@@ -1,0 +1,301 @@
+/* Modern White Theme CSS Variables */
+:root {
+  /* Colors - Fresh Modern White */
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8fafc;
+  --color-bg-card: #ffffff;
+  --color-accent-primary: #3b82f6;
+  --color-accent-secondary: #8b5cf6;
+  --color-accent-success: #10b981;
+  --color-text-primary: #1e293b;
+  --color-text-secondary: #64748b;
+  --color-border: #e2e8f0;
+  --color-success: #10b981;
+  --color-error: #ef4444;
+  --color-warning: #f59e0b;
+
+  /* Typography */
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Spacing */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+  --space-2xl: 3rem;
+
+  /* Border Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.15);
+}
+
+/* Global Styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* Typography */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-md);
+  font-weight: 600;
+}
+
+h1 { font-size: 2rem; font-weight: 700; }
+h2 { font-size: 1.5rem; font-weight: 600; }
+h3 { font-size: 1.25rem; font-weight: 600; }
+
+/* Links */
+a {
+  color: var(--color-accent-primary);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  color: var(--color-accent-secondary);
+}
+
+/* Cards */
+.card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Buttons */
+.btn {
+  font-family: var(--font-display);
+  padding: var(--space-sm) var(--space-lg);
+  border: 2px solid var(--color-accent-primary);
+  background: transparent;
+  color: var(--color-accent-primary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+
+.btn:hover {
+  background: var(--color-accent-primary);
+  color: #ffffff;
+  box-shadow: var(--shadow-md);
+}
+
+.btn-primary {
+  background: var(--color-accent-primary);
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background: var(--color-accent-secondary);
+  border-color: var(--color-accent-secondary);
+  color: #ffffff;
+}
+
+/* Form Inputs */
+.input {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: 1rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-accent-primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+/* Layout */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-xl);
+}
+
+.flex {
+  display: flex;
+}
+
+.flex-col {
+  flex-direction: column;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.justify-center {
+  justify-content: center;
+}
+
+.justify-between {
+  justify-content: space-between;
+}
+
+.gap-sm { gap: var(--space-sm); }
+.gap-md { gap: var(--space-md); }
+.gap-lg { gap: var(--space-lg); }
+
+/* Grid */
+.grid {
+  display: grid;
+}
+
+.grid-cols-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.grid-cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { transform: translateX(-20px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.animate-slideIn {
+  animation: slideIn 0.3s ease-out;
+}
+
+/* Dice Roll Animation */
+@keyframes diceRoll {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(15deg); }
+  75% { transform: rotate(-15deg); }
+}
+
+.dice-rolling {
+  animation: diceRoll 0.3s ease-in-out;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
+}
+
+/* Ant Design Overrides */
+.ant-layout {
+  background: var(--color-bg-secondary) !important;
+}
+
+.ant-card {
+  background: var(--color-bg-card) !important;
+  border-color: var(--color-border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.ant-input {
+  background: var(--color-bg-card) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text-primary) !important;
+}
+
+.ant-btn-primary {
+  background: var(--color-accent-primary) !important;
+  border-color: var(--color-accent-primary) !important;
+}
+
+.ant-btn-primary:hover {
+  background: var(--color-accent-secondary) !important;
+  border-color: var(--color-accent-secondary) !important;
+}
+
+.ant-menu {
+  background: transparent !important;
+}
+
+.ant-menu-item {
+  color: var(--color-text-primary) !important;
+}
+
+.ant-menu-item-selected {
+  color: var(--color-accent-primary) !important;
+}
+
+.ant-tabs-nav {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ant-tabs-tab {
+  color: var(--color-text-secondary) !important;
+}
+
+.ant-tabs-tab-active {
+  color: var(--color-accent-primary) !important;
+}
+
+.ant-tabs-ink-bar {
+  background: var(--color-accent-primary) !important;
+}
+
+.ant-tag {
+  border-radius: var(--radius-sm);
+}
+
+.ant-modal-content {
+  border-radius: var(--radius-lg) !important;
+}
+
+.ant-select-selector {
+  background: var(--color-bg-card) !important;
+  border-color: var(--color-border) !important;
+}

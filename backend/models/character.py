@@ -1,0 +1,25 @@
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
+from sqlalchemy.orm import relationship
+from database import Base
+from sqlalchemy.sql import func
+
+
+class Character(Base):
+    __tablename__ = "characters"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String(100), nullable=False)
+    race = Column(String(50), nullable=True)
+    character_class = Column(String(50), nullable=True)
+    level = Column(Integer, default=1)
+    attributes = Column(JSON, default=dict)  # STR, DEX, CON, INT, WIS, CHA
+    hp = Column(Integer, default=10)
+    ac = Column(Integer, default=10)
+    skills = Column(JSON, default=list)  # 技能列表
+    backstory = Column(Text, nullable=True)
+    personality = Column(JSON, default=dict)  # trait, ideal, bond, flaw
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", backref="characters")

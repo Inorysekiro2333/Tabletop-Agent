@@ -1,15 +1,19 @@
-# Tabletop Agent
+# Tabletop Agent — 暗幕
 
 TRPG（桌面角色扮演游戏）AI KP（主持人）助手，基于 Web 的实时跑团平台。
 
 ## 功能
 
-- **用户系统** - 注册、登录、角色管理
-- **战役管理** - 创建、编辑、删除跑团战役
-- **AI KP** - 支持 DeepSeek/Claude/MiniMax 等大模型作为 KP
+- **用户系统** - 注册、登录、JWT 认证
+- **战役管理** - 创建战役（支持预设剧本 D&D 5e / CoC 7th / 修仙），自定义剧本
+- **AI KP** - 支持 DeepSeek / Claude / MiniMax 等大模型，可切换激活
 - **实时聊天** - WebSocket 实时消息传递，流式输出 KP 思考过程
-- **投骰系统** - 内置 D&D 风格投骰，支持快捷投骰
+- **投骰系统** - 快捷投骰（d4-d100），全屏大字体动画，成功/失败判定
 - **存档系统** - 保存/加载游戏进度
+- **暗幕主题** - OKLCH 色彩空间暗黑/亮色双主题，Grimoire 风格侧边栏
+- **角色卡** - 属性面板（STR/DEX/CON/INT/WIS/CHA），HP/AC 战斗数据，特质标签
+- **行动建议** - 上下文推导的行动建议 Chips，点击快速输入
+- **KP 思考面板** - 可折叠的 AI 思考过程展示，GM 打字动画
 
 ## 技术栈
 
@@ -93,14 +97,24 @@ npm run dev
 
 1. 注册账号并登录
 2. 在「AI 配置」页面添加你的 AI API 密钥（支持 DeepSeek/Claude/MiniMax）
-3. 创建战役并选择 AI 配置
-4. 进入战役房间，开始跑团
+3. 创建战役 — 可选择预设剧本（D&D/CoC/修仙）或自定义剧本
+4. 进入战役房间，预设剧本会自动显示开场白和行动建议
+5. 开始跑团！
 
-### 聊天命令
+### 预设剧本
+
+| 剧本 | 系统 | 风格 |
+|------|------|------|
+| ⚔ 遗忘国度的阴影 | D&D 5e | 奇幻冒险 |
+| ✦ 阿卡姆谜案 | CoC 7th | 恐怖推理 |
+| ☵ 青云问道 | 修仙 | 东方玄幻 |
+
+### 聊天操作
 
 - 直接输入文字与 KP 对话
-- 输入 `/roll 1d20+5` 进行投骰
-- 点击快捷按钮进行快速投骰
+- 点击行动建议 Chips 快速输入
+- 点击快捷投骰按钮（侧边栏）进行投骰
+- Enter 发送，Shift+Enter 换行
 
 ## 项目结构
 
@@ -121,8 +135,16 @@ helloGolang/
 ├── frontend/
 │   └── src/
 │       ├── pages/           # 页面组件
+│       │   ├── Dashboard.tsx    # 大厅（战役/角色/AI管理）
+│       │   ├── ChatRoom.tsx     # 游戏房间
+│       │   ├── Login.tsx        # 登录
+│       │   └── Register.tsx     # 注册
 │       ├── services/        # API 服务
-│       └── stores/          # 状态管理
+│       ├── stores/          # 状态管理（Zustand）
+│       ├── hooks/           # 自定义 Hook（useTheme）
+│       ├── data/            # 预设数据（presets）
+│       └── styles/          # 主题样式
+└── TODO.md                  # 开发待办清单
 ```
 
 ## API 文档
@@ -139,6 +161,12 @@ helloGolang/
 | POST | /api/campaigns | 创建战役 |
 | GET | /api/ai-configs | 获取 AI 配置 |
 | POST | /api/ai-configs | 创建 AI 配置 |
+| PUT | /api/ai-configs/{id} | 更新 AI 配置 |
+| DELETE | /api/ai-configs/{id} | 删除 AI 配置 |
+| POST | /api/ai-configs/{id}/activate | 激活 AI 配置 |
+| GET | /api/characters | 获取角色卡列表 |
+| POST | /api/characters | 创建角色卡 |
+| WS | /ws/{campaign_id} | WebSocket 聊天 |
 
 ## License
 

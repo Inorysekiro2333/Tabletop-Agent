@@ -39,9 +39,10 @@ export const useAuthStore = create<AuthState>((set) => ({
         isAuthenticated: true,
         isLoading: false,
       });
-    } catch (error: any) {
+    } catch (error) {
+      const err = error as { response?: { data?: { detail?: string } } };
       set({
-        error: error.response?.data?.detail || 'Login failed',
+        error: err.response?.data?.detail || 'Login failed',
         isLoading: false,
       });
       throw error;
@@ -53,9 +54,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       await authAPI.register(username, password);
       await useAuthStore.getState().login(username, password);
-    } catch (error: any) {
+    } catch (error) {
+      const err = error as { response?: { data?: { detail?: string } } };
       set({
-        error: error.response?.data?.detail || 'Registration failed',
+        error: err.response?.data?.detail || 'Registration failed',
         isLoading: false,
       });
       throw error;

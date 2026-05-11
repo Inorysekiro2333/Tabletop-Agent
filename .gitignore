@@ -36,5 +36,8 @@ npm-debug.log*
 htmlcov/
 .pytest_cache/
 
+# Project
+TODO.md
+
 # Misc
 *.bak

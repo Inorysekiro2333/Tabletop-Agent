@@ -1,191 +1,597 @@
+/* ==========================================================================
+   ChatRoom Page
+   Layout: Game screen — sidebar + chat area
+   Reference: index.html (暗幕 game screen)
+   ========================================================================== */
+
 .chat-room {
   height: 100vh;
   display: flex;
-  flex-direction: column;
-  background: var(--color-bg-secondary);
-}
-
-.chat-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-lg);
-  padding: var(--space-md) var(--space-xl);
-  background: var(--color-bg-card);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.chat-header h2 {
-  flex: 1;
-  margin: 0;
-  font-family: var(--font-display);
-  color: var(--color-accent-primary);
-  font-weight: 600;
-}
-
-.header-actions {
-  display: flex;
-  gap: var(--space-md);
-}
-
-.chat-container {
-  flex: 1;
-  display: flex;
+  flex-direction: row;
+  background: var(--color-bg-primary);
   overflow: hidden;
 }
 
+/* -------------------------------------------------------------------------
+   Character Sidebar
+   ------------------------------------------------------------------------- */
 .chat-sidebar {
-  width: 200px;
+  width: var(--sidebar-w);
+  flex-shrink: 0;
   background: var(--color-bg-card);
   border-right: 1px solid var(--color-border);
-  padding: var(--space-lg);
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  z-index: var(--z-sidebar);
+  height: 100%;
+  transition: transform var(--transition-normal);
 }
 
-.chat-sidebar h3 {
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
-  margin-bottom: var(--space-md);
+.chat-sidebar .sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.chat-sidebar .sidebar-header h2 {
+  font-size: var(--text-lg);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.chat-sidebar .sidebar-back {
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  letter-spacing: 0.06em;
+  transition: all var(--transition-fast);
+  font-family: var(--font-body);
+}
+
+.chat-sidebar .sidebar-back:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent-primary);
+}
+
+/* Character panel content */
+.char-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.char-name-block {
+  margin-bottom: 20px;
+}
+
+.char-name-block h3 {
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: -0.01em;
+}
+
+.char-name-block .char-sub {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+
+.char-section {
+  margin-bottom: 18px;
+}
+
+.char-section-title {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 
-.quick-rolls {
+/* HP bar */
+.hp-bar-wrap {
+  margin-top: 8px;
+}
+
+.hp-bar-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  margin-bottom: 4px;
+  color: var(--color-text-secondary);
+}
+
+.hp-bar {
+  height: 5px;
+  background: var(--color-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.hp-bar .fill {
+  height: 100%;
+  background: var(--color-accent-primary);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+/* Stat mini grid */
+.stat-mini-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-sm);
-  margin-bottom: var(--space-xl);
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
 }
 
-.quick-rolls .ant-btn {
+.stat-mini {
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 10px 6px;
+  text-align: center;
+}
+
+.stat-mini .sm-val {
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+}
+
+.stat-mini .sm-lbl {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  margin-top: 3px;
+  text-transform: uppercase;
+}
+
+/* Skills */
+.skill-mini-list {
+  list-style: none;
+}
+
+.skill-mini-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.skill-mini-list .sk-name {
+  color: var(--color-text-secondary);
+}
+
+.skill-mini-list .sk-bonus {
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* Traits */
+.trait-tag {
+  display: inline-block;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  margin: 2px 3px 2px 0;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
+/* Quick dice in sidebar */
+.quick-dice {
+  padding: 16px 20px;
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.quick-dice-title {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.quick-dice-row {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.qd-btn {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.qd-btn:hover {
+  border-color: var(--color-accent-primary);
+  color: var(--color-accent-primary);
+}
+
+.qd-btn.d20 {
+  border-color: var(--color-accent-primary);
+  color: var(--color-accent-primary);
+}
+
+/* Save list */
+.save-section {
+  padding: 16px 20px;
+}
+
+.save-section h3 {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
 .save-item {
   cursor: pointer;
-  padding: var(--space-sm) !important;
-  border-radius: var(--radius-sm);
+  padding: 8px 10px !important;
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast);
+  margin-bottom: 2px;
 }
 
 .save-item:hover {
-  background: var(--color-bg-secondary);
+  background: var(--color-hover);
 }
 
-.save-time {
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
+.save-item .ant-list-item-meta-title {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  margin-bottom: 0;
 }
 
-.chat-main {
+.save-item .save-time {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* -------------------------------------------------------------------------
+   Chat Area
+   ------------------------------------------------------------------------- */
+.chat-area {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  height: 100%;
+  min-width: 0;
+  background: var(--color-bg-primary);
 }
 
-.messages-container {
+/* Top bar */
+.chat-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.chat-topbar .menu-btn {
+  display: none;
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  font-size: 16px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.chat-topbar .scenario-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  letter-spacing: -0.005em;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Theme toggle in topbar */
+.theme-toggle-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.theme-toggle-btn:hover {
+  color: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
+}
+
+/* -------------------------------------------------------------------------
+   Messages Container
+   ------------------------------------------------------------------------- */
+.chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-xl);
+  padding: 24px;
+  scroll-behavior: smooth;
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  gap: 16px;
 }
 
+.chat-messages::-webkit-scrollbar {
+  width: 4px;
+}
+
+.chat-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-messages::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 2px;
+}
+
+/* -------------------------------------------------------------------------
+   Message Base
+   ------------------------------------------------------------------------- */
 .message {
-  max-width: 70%;
-  padding: var(--space-md);
-  border-radius: var(--radius-md);
-  animation: fadeIn 0.3s ease-out;
+  max-width: 82%;
+  animation: msgIn 0.3s ease both;
 }
 
 .message.player {
   align-self: flex-end;
-  background: var(--color-accent-primary);
-  color: #ffffff;
 }
 
 .message.kp {
   align-self: flex-start;
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-}
-
-.message.dice-result {
-  align-self: center;
-  background: var(--color-bg-card);
-  border: 2px solid var(--color-accent-primary);
-  max-width: 300px;
 }
 
 .message.system {
   align-self: center;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-style: italic;
-  font-size: 0.9rem;
+  max-width: 92%;
 }
 
-.message.thinking {
-  align-self: center;
-  color: var(--color-text-secondary);
+.message-role {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
 }
 
-.message-header {
-  font-size: 0.8rem;
-  color: var(--color-accent-primary);
-  margin-bottom: var(--space-xs);
-  font-family: var(--font-display);
-  font-weight: 600;
+.message.player .message-role {
+  text-align: right;
+  padding-right: 2px;
+}
+
+.message.kp .message-role {
+  padding-left: 2px;
 }
 
 .message-content {
-  line-height: 1.6;
-  white-space: pre-wrap;
+  padding: 16px 20px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  line-height: 1.8;
 }
 
-.dice-result-content {
+.message.kp .message-content {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.message.player .message-content {
+  background: var(--color-accent-muted);
+  border: 1px solid oklch(60% 0.16 35 / 0.25);
+  color: var(--color-text-primary);
+}
+
+.message.system .message-content {
+  background: transparent;
+  border: 1px dashed var(--color-border);
   text-align: center;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  letter-spacing: 0.03em;
+  padding: 10px 20px;
 }
 
-.dice-label {
-  display: block;
-  font-size: 0.8rem;
-  color: var(--color-text-secondary);
-  margin-bottom: var(--space-xs);
+.message-content p + p {
+  margin-top: 0.8em;
 }
 
-.dice-total {
-  display: block;
-  font-size: 2.5rem;
-  font-family: var(--font-display);
+.message-content em {
   color: var(--color-accent-primary);
-  font-weight: bold;
+  font-style: normal;
 }
 
-.dice-details {
+/* -------------------------------------------------------------------------
+   KP Thinking
+   ------------------------------------------------------------------------- */
+.message.thinking {
+  align-self: center;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  padding: 0;
+  overflow: hidden;
+  max-width: 480px;
+  border-radius: var(--radius-md);
+}
+
+.thinking-header {
   display: flex;
-  justify-content: center;
-  gap: var(--space-sm);
-  margin: var(--space-sm) 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  cursor: pointer;
+  user-select: none;
+  gap: 8px;
 }
 
-.dice-roll {
-  background: var(--color-bg-secondary);
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
+.thinking-header:hover {
+  background: var(--color-hover);
 }
 
-.dice-modifier {
+.thinking-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
-  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+.thinking-icon {
+  font-size: var(--text-base);
+  color: var(--color-accent-primary);
+}
+
+.thinking-chevron {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.thinking-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.thinking-content {
+  padding: 16px;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-relaxed);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.thinking-content.collapsed {
+  display: none;
+}
+
+/* Typing indicator */
+.typing-indicator {
+  align-self: flex-start;
+  display: flex;
+  gap: 4px;
+  padding: 12px 16px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  align-items: center;
+}
+
+.typing-dots {
+  display: flex;
+  gap: 3px;
+  margin-left: 4px;
+}
+
+.typing-dots span {
+  width: 5px;
+  height: 5px;
+  background: var(--color-accent-primary);
+  border-radius: 50%;
+  animation: dotBounce 1.2s infinite ease;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* -------------------------------------------------------------------------
+   Dice Result in Chat
+   ------------------------------------------------------------------------- */
+.message.dice-result {
+  align-self: center;
+  max-width: 280px;
+}
+
+.dice-inline-block {
+  text-align: center;
+  padding: 20px;
+  background: var(--color-bg-card);
+  border: 2px solid var(--color-accent-primary);
+  border-radius: var(--radius-md);
+  animation: dicePopIn 0.4s ease;
+}
+
+.dice-big {
+  font-family: var(--font-display);
+  font-size: 48px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--color-accent-primary);
+}
+
+.dice-detail {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 6px;
 }
 
 .dice-success {
-  display: block;
-  font-weight: bold;
+  display: inline-block;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  padding: 2px 12px;
+  border-radius: var(--radius-full);
+  margin-left: 6px;
 }
 
 .dice-success.success {
@@ -196,17 +602,295 @@
   color: var(--color-error);
 }
 
-.chat-input-container {
-  padding: var(--space-lg);
+/* Dice individual rolls */
+.dice-rolls {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.dice-roll-tag {
+  background: var(--color-bg-primary);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+}
+
+.dice-modifier-tag {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: 4px 2px;
+}
+
+/* -------------------------------------------------------------------------
+   Typing Indicator — matching OD GM "编织世界" animation
+   ------------------------------------------------------------------------- */
+.typing-indicator-msg {
+  align-self: flex-start;
+  max-width: 82%;
+}
+
+.typing-indicator-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-family: var(--font-body);
+  letter-spacing: 0.02em;
+}
+
+.typing-dots {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.typing-dots span {
+  width: 5px;
+  height: 5px;
+  background: var(--color-accent-primary);
+  border-radius: 50%;
+  animation: dotBounce 1.2s infinite ease;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* -------------------------------------------------------------------------
+   Suggestion Chips
+   ------------------------------------------------------------------------- */
+.suggestions {
+  align-self: flex-start;
+  max-width: 82%;
+  margin-top: -8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 2px;
+}
+
+.suggestion-chip {
+  font-family: var(--font-body);
+  font-size: 12px;
+  padding: 7px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
   background: var(--color-bg-card);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  letter-spacing: 0.01em;
+}
+
+.suggestion-chip:hover {
+  border-color: var(--color-accent-primary);
+  color: var(--color-text-primary);
+  background: var(--color-accent-muted);
+}
+
+.suggestion-chip.used {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* -------------------------------------------------------------------------
+   Input Area
+   ------------------------------------------------------------------------- */
+.chat-input-area {
+  padding: 16px 24px 20px;
   border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+  background: var(--color-bg-primary);
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
 }
 
 .chat-input {
-  display: flex;
-  gap: var(--space-md);
+  flex: 1;
+  min-height: 46px;
+  max-height: 120px;
+  resize: none;
 }
 
 .chat-input .ant-input {
+  background: var(--color-bg-card) !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: var(--radius-md) !important;
+  color: var(--color-text-primary) !important;
+  font-family: var(--font-body) !important;
+  font-size: 14px !important;
+  padding: 12px 16px !important;
+  line-height: 1.5 !important;
+  min-height: 46px;
+}
+
+.chat-input .ant-input:focus {
+  border-color: var(--color-accent-primary) !important;
+}
+
+.chat-input .ant-input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.45;
+}
+
+.send-btn {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-accent-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-accent-primary);
+  color: var(--color-bg-primary);
+  font-size: 18px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.send-btn:hover {
+  opacity: 0.88;
+}
+
+.send-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* -------------------------------------------------------------------------
+   Empty State
+   ------------------------------------------------------------------------- */
+.chat-messages .ant-empty {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+}
+
+.chat-messages .ant-empty-description {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* -------------------------------------------------------------------------
+   Dice Overlay (dramatic dice roll display)
+   ------------------------------------------------------------------------- */
+.dice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dice-overlay);
+  background: oklch(0% 0 0 / 0.7);
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.dice-overlay.show {
+  display: flex;
+}
+
+.dice-overlay-content {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 40px;
+  text-align: center;
+  max-width: 400px;
+  width: 90%;
+  animation: dicePopIn 0.3s ease;
+}
+
+.dice-result-big {
+  font-family: var(--font-display);
+  font-size: 80px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--color-accent-primary);
+  margin: 20px 0;
+}
+
+.dice-label-big {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dice-close-btn {
+  margin-top: 20px;
+  padding: 8px 24px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-primary);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: var(--font-body);
+}
+
+.dice-close-btn:hover {
+  border-color: var(--color-accent-primary);
+}
+
+/* -------------------------------------------------------------------------
+   Responsive
+   ------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .chat-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    transform: translateX(-100%);
+  }
+
+  .chat-sidebar.open {
+    transform: translateX(0);
+  }
+
+  .chat-topbar .menu-btn {
+    display: flex;
+  }
+
+  .chat-messages {
+    padding: 16px;
+  }
+
+  .chat-input-area {
+    padding: 12px 16px 16px;
+  }
+
+  .message {
+    max-width: 93%;
+  }
+
+  .suggestions {
+    max-width: 93%;
+  }
+
+  .stat-mini-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }

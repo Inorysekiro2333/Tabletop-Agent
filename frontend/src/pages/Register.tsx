@@ -20,6 +20,10 @@ export function Register() {
 
   return (
     <div className="login-container">
+      <div className="login-brand">
+        <h1>暗<span className="brand-accent">幕</span></h1>
+        <div className="brand-subtitle">AI 驱动的沉浸式跑团体验</div>
+      </div>
       <div className="login-card">
         <h1 className="login-title">注册</h1>
         <p className="login-subtitle">创建你的跑团账户</p>

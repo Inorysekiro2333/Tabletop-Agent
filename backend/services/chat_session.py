@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 import json
+import re
 
 
 @dataclass
@@ -25,6 +26,7 @@ class GameState:
     player_character_id: Optional[int] = None
     player_name: str = "Player"
     character_name: str = ""
+    character_stats: Dict[str, int] = field(default_factory=dict)
     # 其他状态信息
     npcs: List[Dict] = field(default_factory=list)
     locations: List[str] = field(default_factory=list)
@@ -70,21 +72,85 @@ class ChatSession:
         """设置系统提示词"""
         self.system_prompt = system_prompt
 
+    def set_character_stats(self, character_name: str, hp: int, ac: int, level: int,
+                            attributes: Dict[str, int], player_name: str = ""):
+        """设置当前角色数据，用于状态追踪"""
+        self.game_state.character_name = character_name
+        self.game_state.player_name = player_name or self.game_state.player_name
+        self.game_state.character_stats = {
+            "hp": hp,
+            "ac": ac,
+            "level": level,
+            "STR": attributes.get("STR", 10),
+            "DEX": attributes.get("DEX", 10),
+            "CON": attributes.get("CON", 10),
+            "INT": attributes.get("INT", 10),
+            "WIS": attributes.get("WIS", 10),
+            "CHA": attributes.get("CHA", 10),
+        }
+
     def get_full_system_prompt(self) -> str:
         """获取完整的系统提示词"""
         base_prompt = self.system_prompt or ""
 
-        # 添加玩家信息
+        stats = self.game_state.character_stats
+        stats_text = ""
+        if stats:
+            stats_text = f"""
+【当前角色状态】
+- 名称: {self.game_state.character_name}
+- HP: {stats.get('hp', '?')} | AC: {stats.get('ac', '?')} | 等级: {stats.get('level', '?')}
+- 属性: 力量{stats.get('STR','?')} 敏捷{stats.get('DEX','?')} 体质{stats.get('CON','?')} 智力{stats.get('INT','?')} 感知{stats.get('WIS','?')} 魅力{stats.get('CHA','?')}
+
+【状态变化规则 - 非常重要】
+当游戏中角色受到伤害、治疗、属性变化或任何状态改变时，你必须在回复末尾用以下格式标记：
+[CHAR_UPDATE: hp=-5]  表示HP减少5
+[CHAR_UPDATE: hp=+3]  表示HP恢复3
+[CHAR_UPDATE: STR=+1]  表示力量+1
+[CHAR_UPDATE: ac=-2]  表示护甲-2
+可用的字段: hp, ac, level, STR, DEX, CON, INT, WIS, CHA
+多个变化可以同时标记，例如: [CHAR_UPDATE: hp=-8][CHAR_UPDATE: STR=-1]
+数字前必须有+或-号表示增减。
+"""
+
         player_info = f"""
 当前玩家: {self.game_state.character_name} ({self.game_state.player_name})
 当前场景: {self.game_state.current_scene or "未设定"}
 会话次数: 第 {self.game_state.session_number} 章
 
-请作为 D&D 5e 的 KP/主持人，引导玩家进行冒险。
+请作为 TRPG 的 KP/主持人，引导玩家进行冒险。
 保持剧情连贯性，适当设置悬念和挑战。
 当玩家请求投骰时，请使用 /roll 命令。
 """
-        return base_prompt + player_info if base_prompt else player_info
+        return base_prompt + stats_text + player_info if base_prompt else stats_text + player_info
+
+    @staticmethod
+    def parse_character_updates(text: str) -> tuple[str, Dict[str, int]]:
+        """从 AI 响应文本中提取角色状态变化，返回 (清理后文本, 变化字典)
+
+        解析 [CHAR_UPDATE: field=+delta] 或 [CHAR_UPDATE: field=-delta] 格式。
+        delta 必须是带正负号的整数。
+        """
+        pattern = r'\[CHAR_UPDATE:\s*(\w+)\s*=\s*([+-]\d+)\]'
+        updates: Dict[str, int] = {}
+        cleaned = text
+
+        for match in re.finditer(pattern, text):
+            field = match.group(1)
+            delta_str = match.group(2)
+            try:
+                delta = int(delta_str)
+            except ValueError:
+                continue
+            if field in updates:
+                updates[field] += delta
+            else:
+                updates[field] = delta
+
+        cleaned = re.sub(pattern, '', text).strip()
+        # 清理多余空行
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+        return cleaned, updates
 
     def get_game_snapshot(self) -> Dict[str, Any]:
         """获取游戏快照，用于存档"""
@@ -95,6 +161,7 @@ class ChatSession:
             "player_character_id": self.game_state.player_character_id,
             "player_name": self.game_state.player_name,
             "character_name": self.game_state.character_name,
+            "character_stats": self.game_state.character_stats,
             "npcs": self.game_state.npcs,
             "locations": self.game_state.locations,
             "messages_count": len(self.messages)
@@ -107,6 +174,7 @@ class ChatSession:
         self.game_state.player_character_id = snapshot.get("player_character_id")
         self.game_state.player_name = snapshot.get("player_name", "Player")
         self.game_state.character_name = snapshot.get("character_name", "")
+        self.game_state.character_stats = snapshot.get("character_stats", {})
         self.game_state.npcs = snapshot.get("npcs", [])
         self.game_state.locations = snapshot.get("locations", [])
 

@@ -5,9 +5,6 @@ import type { InputRef } from 'antd';
 import {
   SendOutlined,
   SaveOutlined,
-  LoadingOutlined,
-  CaretDownOutlined,
-  SyncOutlined,
   MenuOutlined,
   BulbOutlined,
 } from '@ant-design/icons';
@@ -18,10 +15,6 @@ import type { Campaign, Character, Save } from '../services/api';
 import { useTheme } from '../hooks/useTheme';
 import { PRESETS } from '../data/presets';
 import './ChatRoom.css';
-
-interface ThinkingMessage extends ChatMessage {
-  collapsed?: boolean;
-}
 
 const QUICK_DICE = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'];
 
@@ -73,7 +66,7 @@ export function ChatRoom() {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
-  const [messages, setMessages] = useState<ThinkingMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [connected, setConnected] = useState(false);
   const [saves, setSaves] = useState<Save[]>([]);
@@ -99,7 +92,7 @@ export function ChatRoom() {
       if (preset) {
         usePresetRef.current = true;
         const now = new Date().toISOString();
-        const openingMsgs: ThinkingMessage[] = preset.opening.map((o, i) => ({
+        const openingMsgs: ChatMessage[] = preset.opening.map((o, i) => ({
           id: `preset-opening-${i}`,
           type: o.type === 'system' ? 'system' : 'kp_response',
           role: o.type === 'system' ? 'system' : 'kp',
@@ -174,7 +167,7 @@ export function ChatRoom() {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === msg.thinking_id
-              ? { ...m, type: 'kp_response', role: 'kp', content: msg.content, collapsed: false }
+              ? { ...m, type: 'kp_response', role: 'kp', content: msg.content }
               : m
           )
         );
@@ -192,8 +185,43 @@ export function ChatRoom() {
       setIsKPThinking(true);
       setMessages((prev) => [
         ...prev,
-        { ...msg, role: 'kp', timestamp: new Date().toISOString(), collapsed: false },
+        { ...msg, type: 'kp_response', role: 'kp', content: '', timestamp: new Date().toISOString() },
       ]);
+    } else if (msg.type === 'character_update') {
+      setIsKPThinking(false);
+      if (msg.stats) {
+        setSelectedCharacter((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            hp: msg.stats!.hp ?? prev.hp,
+            ac: msg.stats!.ac ?? prev.ac,
+            level: msg.stats!.level ?? prev.level,
+            attributes: {
+              STR: msg.stats!.STR ?? prev.attributes?.STR ?? 10,
+              DEX: msg.stats!.DEX ?? prev.attributes?.DEX ?? 10,
+              CON: msg.stats!.CON ?? prev.attributes?.CON ?? 10,
+              INT: msg.stats!.INT ?? prev.attributes?.INT ?? 10,
+              WIS: msg.stats!.WIS ?? prev.attributes?.WIS ?? 10,
+              CHA: msg.stats!.CHA ?? prev.attributes?.CHA ?? 10,
+            },
+          };
+        });
+      }
+      if (msg.updates) {
+        const changes = Object.entries(msg.updates)
+          .map(([k, v]) => `${k}${v > 0 ? '+' : ''}${v}`)
+          .join('，');
+        setMessages((prev) => [
+          ...prev,
+          {
+            type: 'system',
+            role: 'system',
+            content: `角色状态变化: ${changes}`,
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+      }
     } else if (msg.type === 'system' || msg.type === 'error') {
       setMessages((prev) => [
         ...prev,
@@ -237,12 +265,6 @@ export function ChatRoom() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
-
-  const handleToggleThinking = useCallback((msgId: string) => {
-    setMessages((prev) =>
-      prev.map((m) => (m.id === msgId ? { ...m, collapsed: !m.collapsed } : m))
-    );
-  }, []);
 
   const handleSend = () => {
     if (!inputValue.trim() || !connected) return;
@@ -327,50 +349,13 @@ export function ChatRoom() {
     return [];
   }, [messages, usedSuggestions]);
 
-  // Show suggestions only after the last message is from KP
-  const showSuggestions = suggestionChips.length > 0 && messages.length > 0
+  // Show suggestions only after KP has finished responding
+  const showSuggestions = !isKPThinking && suggestionChips.length > 0 && messages.length > 0
     && messages[messages.length - 1]?.role === 'kp';
 
   const renderMessage = (msg: ChatMessage, index: number) => {
-    // KP Thinking (collapsible)
-    if (msg.type === 'kp_thinking') {
-      const thinkingMsg = msg as ThinkingMessage;
-      return (
-        <div key={msg.id || index} className="message thinking">
-          <div
-            className="thinking-header"
-            onClick={() => msg.id && handleToggleThinking(msg.id)}
-            role="button"
-            tabIndex={0}
-            aria-expanded={!thinkingMsg.collapsed}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                if (msg.id) handleToggleThinking(msg.id);
-              }
-            }}
-          >
-            <div className="thinking-title">
-              {thinkingMsg.collapsed ? (
-                <SyncOutlined className="thinking-icon" spin />
-              ) : (
-                <LoadingOutlined className="thinking-icon" />
-              )}
-              <span>KP 思考中...</span>
-            </div>
-            <CaretDownOutlined
-              className={`thinking-chevron ${thinkingMsg.collapsed ? '' : 'expanded'}`}
-            />
-          </div>
-          <div
-            id={`thinking-content-${msg.id}`}
-            className={`thinking-content ${thinkingMsg.collapsed ? 'collapsed' : ''}`}
-          >
-            {msg.content || '思考中...'}
-          </div>
-        </div>
-      );
-    }
+    const isLastKpMessage = msg.role === 'kp' && isKPThinking
+      && index === messages.length - 1;
 
     // Dice result
     if (msg.type === 'dice_result') {
@@ -423,7 +408,10 @@ export function ChatRoom() {
         {isPlayer ? (
           <div className="message-content">{msg.content}</div>
         ) : (
-          <div className="message-content" dangerouslySetInnerHTML={{ __html: msg.content || '' }} />
+          <div className={`message-content${isLastKpMessage ? ' streaming' : ''}`}>
+            <span dangerouslySetInnerHTML={{ __html: msg.content || '' }} />
+            {isLastKpMessage && <span className="streaming-cursor" />}
+          </div>
         )}
       </div>
     );
@@ -481,27 +469,27 @@ export function ChatRoom() {
                 <div className="stat-mini-grid">
                   <div className="stat-mini">
                     <div className="sm-val">{selectedCharacter.attributes?.STR ?? '—'}</div>
-                    <div className="sm-lbl">STR</div>
+                    <div className="sm-lbl">力量</div>
                   </div>
                   <div className="stat-mini">
                     <div className="sm-val">{selectedCharacter.attributes?.DEX ?? '—'}</div>
-                    <div className="sm-lbl">DEX</div>
+                    <div className="sm-lbl">敏捷</div>
                   </div>
                   <div className="stat-mini">
                     <div className="sm-val">{selectedCharacter.attributes?.CON ?? '—'}</div>
-                    <div className="sm-lbl">CON</div>
+                    <div className="sm-lbl">体质</div>
                   </div>
                   <div className="stat-mini">
                     <div className="sm-val">{selectedCharacter.attributes?.INT ?? '—'}</div>
-                    <div className="sm-lbl">INT</div>
+                    <div className="sm-lbl">智力</div>
                   </div>
                   <div className="stat-mini">
                     <div className="sm-val">{selectedCharacter.attributes?.WIS ?? '—'}</div>
-                    <div className="sm-lbl">WIS</div>
+                    <div className="sm-lbl">感知</div>
                   </div>
                   <div className="stat-mini">
                     <div className="sm-val">{selectedCharacter.attributes?.CHA ?? '—'}</div>
-                    <div className="sm-lbl">CHA</div>
+                    <div className="sm-lbl">魅力</div>
                   </div>
                 </div>
               </div>
@@ -511,7 +499,7 @@ export function ChatRoom() {
                 <div className="stat-mini-grid">
                   <div className="stat-mini">
                     <div className="sm-val">{selectedCharacter.ac || '—'}</div>
-                    <div className="sm-lbl">AC</div>
+                    <div className="sm-lbl">护甲</div>
                   </div>
                   <div className="stat-mini">
                     <div className="sm-val">Lv {selectedCharacter.level}</div>
@@ -519,7 +507,7 @@ export function ChatRoom() {
                   </div>
                   <div className="stat-mini">
                     <div className="sm-val">{hpVal}</div>
-                    <div className="sm-lbl">HP</div>
+                    <div className="sm-lbl">生命</div>
                   </div>
                 </div>
               </div>
@@ -638,20 +626,6 @@ export function ChatRoom() {
             />
           ) : (
             messages.map((msg, i) => renderMessage(msg, i))
-          )}
-
-          {/* Typing indicator — matches OD GM typing animation */}
-          {isKPThinking && messages[messages.length - 1]?.type !== 'kp_thinking' && (
-            <div className="message typing-indicator-msg">
-              <div className="typing-indicator-content">
-                GM 正在编织世界
-                <div className="typing-dots">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </div>
-            </div>
           )}
 
           {/* Suggestion chips */}

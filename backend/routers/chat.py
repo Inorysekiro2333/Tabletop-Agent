@@ -232,6 +232,20 @@ async def websocket_chat(websocket: WebSocket, campaign_id: int, token: str = No
             if ai_config:
                 session.ai_config_id = ai_config.id
 
+        # 加载用户角色数据到会话（用于状态追踪）
+        character = db.query(Character).filter(
+            Character.user_id == user.id
+        ).first()
+        if character:
+            session.set_character_stats(
+                character_name=character.name,
+                hp=character.hp or 10,
+                ac=character.ac or 10,
+                level=character.level or 1,
+                attributes=character.attributes or {},
+                player_name=user.username or ""
+            )
+
         # 如果数据库中有历史消息，加载它们并标记为已生成开场
         session.load_messages_from_db(campaign_id, db)
 
@@ -397,23 +411,42 @@ async def get_ai_response(campaign_id: int, session: ChatSession):
 
             logger.info(f"AI响应完成: chunk_count={chunk_count}, full_response长度={len(full_response)}, 前100字符: {repr(full_response[:100])}")
 
-            # 广播 KP 响应
+            # 解析角色状态变化
+            cleaned_response, char_updates = ChatSession.parse_character_updates(full_response)
+            if char_updates:
+                logger.info(f"检测到角色状态变化: {char_updates}")
+                # 更新数据库中的角色
+                character = db.query(Character).filter(
+                    Character.user_id == db.query(Campaign).get(campaign_id).user_id
+                ).first()
+                if character:
+                    _apply_character_updates(character, char_updates, session, db)
+                # 广播角色状态更新到前端
+                await manager.broadcast(campaign_id, {
+                    "type": "character_update",
+                    "role": "system",
+                    "content": "角色状态已更新",
+                    "updates": char_updates,
+                    "stats": session.game_state.character_stats
+                })
+
+            # 广播 KP 响应（使用清理后的文本）
             await manager.broadcast(campaign_id, {
                 "type": "kp_response",
                 "thinking_id": thinking_id,
                 "role": "kp",
-                "content": full_response
+                "content": cleaned_response
             })
 
-            # 记录消息
-            session.add_message("kp", full_response)
+            # 记录消息（存清理后的文本）
+            session.add_message("kp", cleaned_response)
 
             # 保存到数据库
             log = SessionLog(
                 campaign_id=campaign_id,
                 session_number=session.game_state.session_number,
                 role="kp",
-                content=full_response
+                content=cleaned_response
             )
             db.add(log)
             db.commit()
@@ -427,6 +460,35 @@ async def get_ai_response(campaign_id: int, session: ChatSession):
 
     finally:
         db.close()
+
+
+def _apply_character_updates(character, updates: Dict[str, int], session: ChatSession, db):
+    """将 CHAR_UPDATE 变化应用到角色数据库和会话缓存"""
+    stat_fields = {"STR", "DEX", "CON", "INT", "WIS", "CHA"}
+
+    for field, delta in updates.items():
+        if field == "hp":
+            character.hp = max(0, (character.hp or 0) + delta)
+        elif field == "ac":
+            character.ac = max(0, (character.ac or 10) + delta)
+        elif field == "level":
+            character.level = max(1, (character.level or 1) + delta)
+        elif field in stat_fields:
+            attrs = dict(character.attributes or {})
+            attrs[field] = max(1, min(30, attrs.get(field, 10) + delta))
+            character.attributes = attrs
+
+    db.commit()
+    db.refresh(character)
+
+    # 更新会话缓存
+    session.set_character_stats(
+        character_name=character.name,
+        hp=character.hp or 0,
+        ac=character.ac or 10,
+        level=character.level or 1,
+        attributes=character.attributes or {},
+    )
 
 
 async def handle_roll_command(websocket: WebSocket, campaign_id: int, dice_str: str):

@@ -5,6 +5,7 @@ from database import get_db
 from models.user import User
 from models.campaign import Campaign, CampaignStatus
 from models.ai_config import AIConfig
+from models.save import Save, SessionLog
 from schemas.campaign import CampaignCreate, CampaignUpdate, CampaignResponse
 from utils.security import get_current_user
 
@@ -122,7 +123,7 @@ async def delete_campaign(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Delete a campaign"""
+    """Delete a campaign and all related data"""
     campaign = db.query(Campaign).filter(
         Campaign.id == campaign_id,
         Campaign.user_id == current_user.id
@@ -134,5 +135,8 @@ async def delete_campaign(
             detail="Campaign not found"
         )
 
+    # 先删除关联的存档和聊天记录
+    db.query(Save).filter(Save.campaign_id == campaign_id).delete()
+    db.query(SessionLog).filter(SessionLog.campaign_id == campaign_id).delete()
     db.delete(campaign)
     db.commit()

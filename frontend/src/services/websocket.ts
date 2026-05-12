@@ -1,5 +1,5 @@
 export interface ChatMessage {
-  type: 'player_message' | 'kp_response' | 'kp_thinking' | 'kp_thinking_chunk' | 'dice_result' | 'system' | 'error' | 'save_loaded' | 'history_clear';
+  type: 'player_message' | 'kp_response' | 'kp_thinking' | 'kp_thinking_chunk' | 'dice_result' | 'system' | 'error' | 'save_loaded' | 'history_clear' | 'character_update';
   role: string;
   content: string;
   username?: string;
@@ -11,6 +11,8 @@ export interface ChatMessage {
   timestamp?: string;
   id?: string;
   thinking_id?: string;
+  updates?: Record<string, number>;
+  stats?: Record<string, number>;
 }
 
 type MessageHandler = (message: ChatMessage) => void;

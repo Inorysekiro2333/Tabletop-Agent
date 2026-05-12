@@ -140,6 +140,16 @@ export function Dashboard() {
     navigate(`/chat/${campaignId}`);
   };
 
+  const handleDeleteCampaign = async (id: number) => {
+    try {
+      await campaignAPI.delete(id);
+      setCampaigns(prev => prev.filter(c => c.id !== id));
+      message.success('战役已删除');
+    } catch {
+      message.error('删除失败');
+    }
+  };
+
   const handleSelectPreset = (preset: CampaignPreset | null) => {
     setSelectedPreset(preset);
     if (preset) {
@@ -242,6 +252,41 @@ export function Dashboard() {
             </div>
           </div>
         )}
+        {activeCampaigns > 0 && (
+          <div className="dashboard-card card-full">
+            <h3>进行中的战役</h3>
+            <div className="active-campaign-list">
+              {campaigns.filter(c => c.status === 'active').map(campaign => (
+                <div key={campaign.id} className="active-campaign-item">
+                  <div className="active-campaign-info">
+                    <div className="active-campaign-title">{campaign.title}</div>
+                    <div className="active-campaign-desc">
+                      {campaign.description || '暂无描述'} · 第 {campaign.current_session} 节
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                    <Button
+                      type="primary"
+                      icon={<PlayCircleOutlined />}
+                      onClick={() => handlePlay(campaign.id)}
+                    >
+                      继续冒险
+                    </Button>
+                    <Popconfirm
+                      title="确定删除此战役？"
+                      description="删除后无法恢复"
+                      onConfirm={() => handleDeleteCampaign(campaign.id)}
+                      okText="删除"
+                      cancelText="取消"
+                    >
+                      <Button danger icon={<DeleteOutlined />} />
+                    </Popconfirm>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -261,13 +306,24 @@ export function Dashboard() {
             title={campaign.title}
             className="campaign-card"
             extra={
-              <Button
-                type="primary"
-                icon={<PlayCircleOutlined />}
-                onClick={() => handlePlay(campaign.id)}
-              >
-                开始
-              </Button>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <Button
+                  type="primary"
+                  icon={<PlayCircleOutlined />}
+                  onClick={() => handlePlay(campaign.id)}
+                >
+                  开始
+                </Button>
+                <Popconfirm
+                  title="确定删除此战役？"
+                  description="删除后无法恢复"
+                  onConfirm={() => handleDeleteCampaign(campaign.id)}
+                  okText="删除"
+                  cancelText="取消"
+                >
+                  <Button size="small" danger icon={<DeleteOutlined />} />
+                </Popconfirm>
+              </div>
             }
           >
             <p>{campaign.description || '暂无描述'}</p>
@@ -294,7 +350,7 @@ export function Dashboard() {
             <p>种族: {character.race || '未知'}</p>
             <p>职业: {character.character_class || '未知'}</p>
             <p>等级: {character.level}</p>
-            <p>HP: {character.hp} | AC: {character.ac}</p>
+            <p>生命: {character.hp} | 护甲: {character.ac}</p>
           </Card>
         ))}
       </div>
@@ -384,7 +440,7 @@ export function Dashboard() {
         </ul>
         <div className="sidebar-footer">
           <button className="theme-toggle" onClick={toggleTheme}>
-            <BulbOutlined /> {isDark ? 'Toggle Light' : 'Toggle Dark'}
+            <BulbOutlined /> {isDark ? '亮色模式' : '暗色模式'}
           </button>
           <button className="sidebar-logout" onClick={logout}>
             <LogoutOutlined /> 退出登录

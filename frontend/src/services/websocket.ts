@@ -1,5 +1,5 @@
 export interface ChatMessage {
-  type: 'player_message' | 'kp_response' | 'kp_thinking' | 'kp_thinking_chunk' | 'dice_result' | 'system' | 'error' | 'save_loaded' | 'history_clear' | 'character_update';
+  type: 'player_message' | 'kp_response' | 'kp_thinking' | 'kp_thinking_chunk' | 'dice_result' | 'system' | 'error' | 'save_loaded' | 'save_created' | 'history_clear' | 'character_update' | 'branch_list' | 'branch_created' | 'branch_switched';
   role: string;
   content: string;
   username?: string;
@@ -13,6 +13,14 @@ export interface ChatMessage {
   thinking_id?: string;
   updates?: Record<string, number>;
   stats?: Record<string, number>;
+  snapshot?: Record<string, unknown>;
+  scene?: string;
+  npcs?: Array<Record<string, unknown>>;
+  locations?: string[];
+  selected_character?: Record<string, unknown>;
+  character_stats?: Record<string, number>;
+  save?: Record<string, unknown>;
+  branches?: Array<{id: number; name: string; is_active: boolean; created_at: string}>;
 }
 
 type MessageHandler = (message: ChatMessage) => void;
@@ -68,7 +76,7 @@ class WebSocketService {
     });
   }
 
-  send(message: { type: string; content?: string; save_id?: number }) {
+  send(message: { type: string; content?: string; save_id?: number; character_id?: number }) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     }
@@ -84,6 +92,26 @@ class WebSocketService {
 
   loadSave(saveId: number) {
     this.send({ type: 'load_save', save_id: saveId });
+  }
+
+  selectCharacter(characterId: number) {
+    this.send({ type: 'select_character', character_id: characterId });
+  }
+
+  sendSaveGame(name: string) {
+    this.send({ type: 'save_game', content: name });
+  }
+
+  createBranch(name: string) {
+    this.send({ type: 'branch_create', content: name });
+  }
+
+  switchBranch(branchId: number | null) {
+    this.send({ type: 'branch_switch', branch_id: branchId });
+  }
+
+  listBranches() {
+    this.send({ type: 'branch_list' });
   }
 
   onMessage(handler: MessageHandler) {

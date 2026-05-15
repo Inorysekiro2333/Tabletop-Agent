@@ -10,6 +10,7 @@ import models.ai_config
 import models.character
 import models.campaign
 import models.save
+import models.chat_branch
 
 settings = get_settings()
 

@@ -8,6 +8,7 @@ import json
 import asyncio
 import uuid
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ from models.campaign import Campaign
 from models.character import Character
 from models.ai_config import AIConfig
 from models.save import SessionLog
+from models.chat_branch import ChatBranch
 from utils.security import get_current_user, verify_token
 from services.ai_gateway import AIGateway
 from services.chat_session import ChatSessionManager, ChatSession
@@ -154,6 +156,7 @@ async def generate_opening_story(campaign: Campaign, user: User, session: ChatSe
             log = SessionLog(
                 campaign_id=campaign.id,
                 session_number=session.game_state.session_number,
+                branch_id=session.current_branch_id,
                 role="kp",
                 content=full_response
             )
@@ -245,6 +248,22 @@ async def websocket_chat(websocket: WebSocket, campaign_id: int, token: str = No
                 attributes=character.attributes or {},
                 player_name=user.username or ""
             )
+            # P0-1: 注入完整角色数据到 AI 上下文
+            char_data = {
+                "id": character.id,
+                "name": character.name,
+                "race": character.race or "",
+                "character_class": character.character_class or "",
+                "level": character.level or 1,
+                "backstory": character.backstory or "",
+                "personality": character.personality or {},
+                "skills": character.skills or [],
+                "attributes": character.attributes or {},
+                "hp": character.hp or 10,
+                "ac": character.ac or 10,
+                "equipment": getattr(character, 'equipment', '') or '',
+            }
+            session.set_selected_character(char_data)
 
         # 如果数据库中有历史消息，加载它们并标记为已生成开场
         session.load_messages_from_db(campaign_id, db)
@@ -294,6 +313,16 @@ async def websocket_chat(websocket: WebSocket, campaign_id: int, token: str = No
                 await handle_roll_command(websocket, campaign_id, content)
             elif msg_type == "load_save":
                 await handle_load_save(websocket, campaign_id, user, message_data.get("save_id"))
+            elif msg_type == "select_character":
+                await handle_select_character(websocket, campaign_id, user, message_data.get("character_id"), session)
+            elif msg_type == "save_game":
+                await handle_save_game(websocket, campaign_id, user, message_data, session)
+            elif msg_type == "branch_create":
+                await handle_branch_create(websocket, campaign_id, user, message_data, session)
+            elif msg_type == "branch_switch":
+                await handle_branch_switch(websocket, campaign_id, user, message_data, session)
+            elif msg_type == "branch_list":
+                await handle_branch_list(websocket, campaign_id, user, session)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket, campaign_id)
@@ -303,6 +332,267 @@ async def websocket_chat(websocket: WebSocket, campaign_id: int, token: str = No
             "content": f"Error: {str(e)}"
         })
         manager.disconnect(websocket, campaign_id)
+
+
+async def handle_select_character(
+    websocket: WebSocket,
+    campaign_id: int,
+    user: User,
+    character_id: int,
+    session: ChatSession
+):
+    """处理角色选择 —— P0-1: 将完整角色数据注入 AI 上下文"""
+    if not character_id:
+        return
+
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        character = db.query(Character).filter(
+            Character.id == character_id,
+            Character.user_id == user.id
+        ).first()
+        if character:
+            char_data = {
+                "id": character.id,
+                "name": character.name,
+                "race": character.race or "",
+                "character_class": character.character_class or "",
+                "level": character.level or 1,
+                "backstory": character.backstory or "",
+                "personality": character.personality or {},
+                "skills": character.skills or [],
+                "attributes": character.attributes or {},
+                "hp": character.hp or 10,
+                "ac": character.ac or 10,
+                "equipment": getattr(character, 'equipment', '') or '',
+            }
+            session.set_selected_character(char_data)
+            await websocket.send_json({
+                "type": "system",
+                "content": f"已选择角色: {character.name}，角色信息已注入 AI 上下文"
+            })
+    finally:
+        db.close()
+
+
+async def handle_save_game(
+    websocket: WebSocket,
+    campaign_id: int,
+    user: User,
+    message_data: dict,
+    session: ChatSession
+):
+    """处理存档 —— P0-2: 保存完整游戏快照"""
+    save_name = message_data.get("content", f"存档 {datetime.utcnow().strftime('%m-%d %H:%M')}")
+
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        snapshot = session.get_game_snapshot()
+        save = Save(
+            campaign_id=campaign_id,
+            name=save_name,
+            description=f"第 {snapshot.get('session_number', 1)} 章，{snapshot.get('messages_count', 0)} 条消息",
+            snapshot=snapshot
+        )
+        db.add(save)
+        db.commit()
+        db.refresh(save)
+
+        await websocket.send_json({
+            "type": "save_created",
+            "content": f"存档成功: {save_name}",
+            "save": {
+                "id": save.id,
+                "name": save.name,
+                "snapshot": save.snapshot,
+                "created_at": str(save.created_at)
+            }
+        })
+    except Exception as e:
+        logger.error(f"存档失败: {e}")
+        await websocket.send_json({
+            "type": "error",
+            "content": f"存档失败: {str(e)}"
+        })
+    finally:
+        db.close()
+
+
+async def handle_branch_create(
+    websocket: WebSocket,
+    campaign_id: int,
+    user: User,
+    message_data: dict,
+    session: ChatSession
+):
+    """创建对话分支 —— P0-4"""
+    branch_name = message_data.get("content", f"分支 {datetime.utcnow().strftime('%H:%M')}")
+    parent_message_index = len(session.messages) - 1  # Fork from last message
+
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        # 创建分支记录
+        parent_msg_id = None
+        if parent_message_index >= 0 and parent_message_index < len(session.messages):
+            # 尝试获取对应的 SessionLog ID
+            from models.save import SessionLog
+            all_logs = db.query(SessionLog).filter(
+                SessionLog.campaign_id == campaign_id
+            ).order_by(SessionLog.id).all()
+            if parent_message_index < len(all_logs):
+                parent_msg_id = all_logs[parent_message_index].id
+
+        branch = ChatBranch(
+            campaign_id=campaign_id,
+            parent_message_id=parent_msg_id,
+            name=branch_name,
+            is_active=True
+        )
+        db.add(branch)
+        db.commit()
+        db.refresh(branch)
+
+        # 在会话中创建分支
+        session.create_branch(branch.id, parent_message_index)
+        session.switch_to_branch(branch.id)
+
+        # 停用其他分支
+        db.query(ChatBranch).filter(
+            ChatBranch.campaign_id == campaign_id,
+            ChatBranch.id != branch.id
+        ).update({"is_active": False})
+        db.commit()
+
+        # 通知前端
+        await websocket.send_json({
+            "type": "branch_created",
+            "content": f"已创建分支: {branch_name}",
+            "branch": {"id": branch.id, "name": branch.name, "is_active": True, "created_at": str(branch.created_at)}
+        })
+
+        # 重新发送当前分支的消息
+        for msg in session.messages:
+            await websocket.send_json({
+                "type": "kp_response" if msg.role == "kp" else "player_message",
+                "role": msg.role,
+                "content": msg.content
+            })
+
+        # 发送分支列表
+        await _broadcast_branch_list(websocket, campaign_id, db)
+
+    except Exception as e:
+        logger.error(f"创建分支失败: {e}")
+        await websocket.send_json({
+            "type": "error",
+            "content": f"创建分支失败: {str(e)}"
+        })
+    finally:
+        db.close()
+
+
+async def handle_branch_switch(
+    websocket: WebSocket,
+    campaign_id: int,
+    user: User,
+    message_data: dict,
+    session: ChatSession
+):
+    """切换对话分支 —— P0-4"""
+    branch_id = message_data.get("branch_id")  # None = 主线
+
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        # 保存当前分支消息到数据库
+        current_bid = session.current_branch_id
+        # (消息在 switch_to_branch 中已保存到 branch_messages)
+
+        # 切换到目标分支
+        session.switch_to_branch(branch_id)
+
+        # 更新激活状态
+        db.query(ChatBranch).filter(
+            ChatBranch.campaign_id == campaign_id
+        ).update({"is_active": False})
+        if branch_id:
+            db.query(ChatBranch).filter(ChatBranch.id == branch_id).update({"is_active": True})
+        db.commit()
+
+        # 通知前端
+        branch_name = "主线"
+        if branch_id:
+            branch = db.query(ChatBranch).filter(ChatBranch.id == branch_id).first()
+            branch_name = branch.name if branch else f"分支 {branch_id}"
+
+        # 清空前端消息
+        await websocket.send_json({
+            "type": "history_clear",
+            "content": ""
+        })
+
+        # 发送切换后的消息
+        for msg in session.messages:
+            await websocket.send_json({
+                "type": "kp_response" if msg.role == "kp" else "player_message",
+                "role": msg.role,
+                "content": msg.content
+            })
+
+        await websocket.send_json({
+            "type": "branch_switched",
+            "content": f"已切换到: {branch_name}",
+            "branch_id": branch_id
+        })
+
+        await _broadcast_branch_list(websocket, campaign_id, db)
+
+    except Exception as e:
+        logger.error(f"切换分支失败: {e}")
+        await websocket.send_json({
+            "type": "error",
+            "content": f"切换分支失败: {str(e)}"
+        })
+    finally:
+        db.close()
+
+
+async def handle_branch_list(
+    websocket: WebSocket,
+    campaign_id: int,
+    user: User,
+    session: ChatSession
+):
+    """获取分支列表 —— P0-4"""
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        await _broadcast_branch_list(websocket, campaign_id, db)
+    finally:
+        db.close()
+
+
+async def _broadcast_branch_list(websocket: WebSocket, campaign_id: int, db):
+    """广播分支列表"""
+    branches = db.query(ChatBranch).filter(
+        ChatBranch.campaign_id == campaign_id
+    ).order_by(ChatBranch.created_at).all()
+
+    branch_list = [
+        {"id": b.id, "name": b.name, "is_active": b.is_active, "created_at": str(b.created_at)}
+        for b in branches
+    ]
+
+    # 添加主线
+    branch_list.insert(0, {"id": 0, "name": "主线", "is_active": True, "created_at": ""})
+
+    await websocket.send_json({
+        "type": "branch_list",
+        "branches": branch_list
+    })
 
 
 async def handle_player_message(
@@ -373,7 +663,7 @@ async def get_ai_response(campaign_id: int, session: ChatSession):
 
         # 构建消息（限制历史消息数量避免请求过大）
         messages = [{"role": "system", "content": session.get_full_system_prompt()}]
-        messages.extend(session.get_messages_for_ai(max_history=20))
+        messages.extend(session.get_messages_for_ai(max_history=50))
 
         thinking_id = str(uuid.uuid4())
 
@@ -445,6 +735,7 @@ async def get_ai_response(campaign_id: int, session: ChatSession):
             log = SessionLog(
                 campaign_id=campaign_id,
                 session_number=session.game_state.session_number,
+                branch_id=session.current_branch_id,
                 role="kp",
                 content=cleaned_response
             )
@@ -514,7 +805,7 @@ async def handle_roll_command(websocket: WebSocket, campaign_id: int, dice_str: 
 
 
 async def handle_load_save(websocket: WebSocket, campaign_id: int, user: User, save_id: int):
-    """处理加载存档"""
+    """处理加载存档 —— P0-2: 恢复完整游戏状态"""
     from database import SessionLocal
     from models.save import Save
 
@@ -538,6 +829,12 @@ async def handle_load_save(websocket: WebSocket, campaign_id: int, user: User, s
         # 标记为已生成开场（从存档加载了消息）
         session.story_generated = True
 
+        # 发送清空消息
+        await websocket.send_json({
+            "type": "history_clear",
+            "content": ""
+        })
+
         # 广播加载的存档消息给前端
         for msg in session.messages:
             await websocket.send_json({
@@ -546,10 +843,16 @@ async def handle_load_save(websocket: WebSocket, campaign_id: int, user: User, s
                 "content": msg.content
             })
 
+        # 广播完整的加载信息，包含角色数据和场景
         await websocket.send_json({
             "type": "save_loaded",
             "content": f"已加载存档: {save.name}",
-            "snapshot": save.snapshot
+            "snapshot": save.snapshot,
+            "scene": session.game_state.current_scene,
+            "npcs": session.game_state.npcs,
+            "locations": session.game_state.locations,
+            "selected_character": session.game_state.selected_character,
+            "character_stats": session.game_state.character_stats
         })
 
     finally:

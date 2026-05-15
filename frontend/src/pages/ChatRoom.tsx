@@ -76,6 +76,10 @@ export function ChatRoom() {
   const [diceOverlay, setDiceOverlay] = useState<{ die: string; result: number; max: number } | null>(null);
   const [usedSuggestions, setUsedSuggestions] = useState<Set<string>>(new Set());
   const [isKPThinking, setIsKPThinking] = useState(false);
+  const [branches, setBranches] = useState<Array<{id: number; name: string; is_active: boolean; created_at: string}>>([]);
+  const [currentBranchId, setCurrentBranchId] = useState<number | null>(null);
+  const [branchModalVisible, setBranchModalVisible] = useState(false);
+  const [branchName, setBranchName] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<InputRef>(null);
   const skipBackendInitRef = useRef(true);
@@ -229,6 +233,47 @@ export function ChatRoom() {
       ]);
     } else if (msg.type === 'save_loaded') {
       message.success(msg.content);
+      // 恢复角色状态
+      if (msg.character_stats) {
+        setSelectedCharacter((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            hp: msg.character_stats!.hp ?? prev.hp,
+            ac: msg.character_stats!.ac ?? prev.ac,
+            level: msg.character_stats!.level ?? prev.level,
+            attributes: {
+              STR: msg.character_stats!.STR ?? prev.attributes?.STR ?? 10,
+              DEX: msg.character_stats!.DEX ?? prev.attributes?.DEX ?? 10,
+              CON: msg.character_stats!.CON ?? prev.attributes?.CON ?? 10,
+              INT: msg.character_stats!.INT ?? prev.attributes?.INT ?? 10,
+              WIS: msg.character_stats!.WIS ?? prev.attributes?.WIS ?? 10,
+              CHA: msg.character_stats!.CHA ?? prev.attributes?.CHA ?? 10,
+            },
+          };
+        });
+      }
+      if (msg.selected_character) {
+        const sc = msg.selected_character as Record<string, unknown>;
+        setSelectedCharacter((prev) => ({
+          ...prev,
+          ...sc,
+          id: (sc.id as number) ?? prev?.id ?? 0,
+          name: (sc.name as string) ?? prev?.name ?? '',
+        }) as Character);
+      }
+      loadSaves();
+    } else if (msg.type === 'save_created') {
+      message.success(msg.content);
+      loadSaves();
+    } else if (msg.type === 'branch_list') {
+      if (msg.branches) setBranches(msg.branches);
+    } else if (msg.type === 'branch_created') {
+      message.success(msg.content);
+      setCurrentBranchId(msg.branch?.id ?? null);
+    } else if (msg.type === 'branch_switched') {
+      message.success(msg.content);
+      setCurrentBranchId(msg.branch_id ?? null);
     }
   }, []);
 
@@ -296,31 +341,19 @@ export function ChatRoom() {
     wsService.sendRollDice(diceStr);
   };
 
-  const handleSaveGame = async () => {
+  const handleSaveGame = () => {
     if (!saveName.trim()) {
       message.warning('请输入存档名称');
       return;
     }
-
-    try {
-      const snapshot = {
-        campaign_id: Number(campaignId),
-        session_number: campaign?.current_session || 1,
-        character_name: selectedCharacter?.name,
-        messages_count: messages.length,
-      };
-      await saveAPI.create(Number(campaignId), {
-        name: saveName,
-        description: `第 ${messages.length} 条消息`,
-        snapshot,
-      });
-      message.success('存档成功');
-      setSaveModalVisible(false);
-      setSaveName('');
-      loadSaves();
-    } catch {
-      message.error('存档失败');
+    if (!connected) {
+      message.error('未连接到聊天服务器');
+      return;
     }
+    wsService.sendSaveGame(saveName);
+    message.success('存档请求已发送');
+    setSaveModalVisible(false);
+    setSaveName('');
   };
 
   const handleLoadSave = (save: Save) => {
@@ -328,6 +361,30 @@ export function ChatRoom() {
   };
 
   const closeSidebar = () => setSidebarOpen(false);
+
+  // ── 分支操作 ──
+  const handleCreateBranch = () => {
+    if (!branchName.trim()) {
+      message.warning('请输入分支名称');
+      return;
+    }
+    if (!connected) return;
+    wsService.createBranch(branchName);
+    setBranchModalVisible(false);
+    setBranchName('');
+  };
+
+  const handleSwitchBranch = (branchId: number | null) => {
+    if (!connected) return;
+    wsService.switchBranch(branchId);
+    setCurrentBranchId(branchId);
+  };
+
+  const handleForkFromMessage = (msgIndex: number) => {
+    // Fork from the selected message — create branch with that message as context
+    setBranchName(`分支 (${new Date().toLocaleTimeString()})`);
+    setBranchModalVisible(true);
+  };
 
   // Compute suggestion chips from the last KP message
   const suggestionChips = useMemo(() => {
@@ -398,12 +455,14 @@ export function ChatRoom() {
 
     // Player / KP messages
     const isPlayer = msg.role === 'player';
+    const isBranchMsg = currentBranchId !== null;
     return (
-      <div key={index} className={`message ${msg.role}`}>
+      <div key={index} className={`message ${msg.role}${isBranchMsg ? ' branch-msg' : ''}`}>
         <div className="message-role">
           {isPlayer
             ? selectedCharacter?.name || '玩家'
             : `⚔ GM · ${campaign?.title || '暗幕'}`}
+          {isBranchMsg && <span className="branch-tag">分支</span>}
         </div>
         {isPlayer ? (
           <div className="message-content">{msg.content}</div>
@@ -412,6 +471,16 @@ export function ChatRoom() {
             <span dangerouslySetInnerHTML={{ __html: msg.content || '' }} />
             {isLastKpMessage && <span className="streaming-cursor" />}
           </div>
+        )}
+        {/* Fork button on non-player messages */}
+        {!isPlayer && msg.role === 'kp' && (
+          <button
+            className="fork-btn"
+            onClick={() => handleForkFromMessage(index)}
+            title="从此消息创建分支"
+          >
+            ↩
+          </button>
         )}
       </div>
     );
@@ -582,9 +651,13 @@ export function ChatRoom() {
           <div className="chat-header-actions">
             <Select
               value={selectedCharacter?.id}
-              onChange={(id) =>
-                setSelectedCharacter(characters.find((c) => c.id === id) || null)
-              }
+              onChange={(id) => {
+                const char = characters.find((c) => c.id === id) || null;
+                setSelectedCharacter(char);
+                if (id) {
+                  wsService.selectCharacter(id);
+                }
+              }}
               placeholder="选择角色"
               style={{ width: 130 }}
               size="small"
@@ -595,6 +668,30 @@ export function ChatRoom() {
                 </Select.Option>
               ))}
             </Select>
+            {/* 分支选择器 */}
+            {branches.length > 0 && (
+              <Select
+                value={currentBranchId}
+                onChange={(id) => handleSwitchBranch(id ?? null)}
+                placeholder="分支"
+                style={{ width: 110 }}
+                size="small"
+                className={currentBranchId ? 'branch-select active-branch' : 'branch-select'}
+              >
+                {branches.map((b) => (
+                  <Select.Option key={b.id} value={b.id || undefined}>
+                    {b.name}
+                  </Select.Option>
+                ))}
+              </Select>
+            )}
+            <Button
+              size="small"
+              onClick={() => setBranchModalVisible(true)}
+              title="创建分支"
+            >
+              分支
+            </Button>
             <button
               className="theme-toggle-btn"
               onClick={toggleTheme}
@@ -698,6 +795,22 @@ export function ChatRoom() {
           placeholder="存档名称"
           value={saveName}
           onChange={(e) => setSaveName(e.target.value)}
+        />
+      </Modal>
+
+      {/* Branch Modal */}
+      <Modal
+        title="创建对话分支"
+        open={branchModalVisible}
+        onOk={handleCreateBranch}
+        onCancel={() => setBranchModalVisible(false)}
+        okText="创建分支"
+        cancelText="取消"
+      >
+        <Input
+          placeholder="分支名称（如：探索洞穴）"
+          value={branchName}
+          onChange={(e) => setBranchName(e.target.value)}
         />
       </Modal>
     </div>

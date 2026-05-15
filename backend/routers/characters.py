@@ -30,6 +30,7 @@ def character_to_response(char: Character) -> CharacterResponse:
         hp=char.hp,
         ac=char.ac,
         skills=char.skills or [],
+        equipment=char.equipment or [],
         backstory=char.backstory,
         personality=char.personality or {},
         created_at=char.created_at,
@@ -67,6 +68,7 @@ async def create_character(
         hp=character_data.hp,
         ac=character_data.ac,
         skills=character_data.skills,
+        equipment=character_data.equipment,
         backstory=character_data.backstory,
         personality=personality_dict
     )

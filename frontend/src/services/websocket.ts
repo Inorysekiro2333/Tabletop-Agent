@@ -1,5 +1,5 @@
 export interface ChatMessage {
-  type: 'player_message' | 'kp_response' | 'kp_thinking' | 'kp_thinking_chunk' | 'dice_result' | 'system' | 'error' | 'save_loaded' | 'save_created' | 'history_clear' | 'character_update' | 'branch_created' | 'branch_kp_response' | 'branch_player_message' | 'branch_system';
+  type: 'player_message' | 'kp_response' | 'kp_thinking' | 'kp_thinking_chunk' | 'dice_result' | 'system' | 'error' | 'save_loaded' | 'save_created' | 'history_clear' | 'character_update' | 'branch_created' | 'branch_kp_thinking' | 'branch_kp_thinking_chunk' | 'branch_kp_response' | 'branch_player_message' | 'branch_system';
   role: string;
   content: string;
   username?: string;
@@ -35,6 +35,13 @@ class WebSocketService {
 
   connect(campaignId: number, token: string): Promise<void> {
     return new Promise((resolve, reject) => {
+      // 关闭已有连接，阻止旧连接的 onclose 触发重连
+      if (this.ws) {
+        this.ws.onclose = null;
+        this.ws.close();
+        this.ws = null;
+      }
+
       this.campaignId = campaignId;
       this.token = token;
 
@@ -117,6 +124,7 @@ class WebSocketService {
 
   disconnect() {
     if (this.ws) {
+      this.ws.onclose = null; // 阻止重连
       this.ws.close();
       this.ws = null;
     }

@@ -118,12 +118,14 @@ class ChatSession:
             char = self.game_state.selected_character
             personality = char.get("personality", {}) or {}
             char_info_text = f"""
-【当前玩家角色完整信息】
+【当前玩家角色完整信息 — 这是"你"】
 姓名: {char.get('name', '未知')} | 种族: {char.get('race', '未知')} | 职业: {char.get('character_class', '未知')} | 等级: {char.get('level', 1)}
 背景故事: {char.get('backstory', '无')}
 性格特征: {chr(10).join(f'  - {k}: {v}' for k, v in personality.items()) if personality else '  未设定'}
 技能: {', '.join(char.get('skills', [])) if char.get('skills') else '无'}
 装备: {char.get('equipment', '无')}
+
+重要：上面这个角色就是你的玩家。用"你"来称呼他/她。所有关于角色背景、能力的信息以这里的为准。预设剧本中的角色名只是示例，不要强加给玩家。
 """
 
         stats = self.game_state.character_stats
@@ -147,38 +149,29 @@ class ChatSession:
 """
 
         player_info = f"""
-当前玩家: {self.game_state.character_name} ({self.game_state.player_name})
+当前玩家角色: {self.game_state.character_name} — 你就是这个角色，你的名字是 {self.game_state.character_name}。严格依据上面给出的角色信息来回应，不要把预设剧本中的角色名字强加给玩家。
 当前场景: {self.game_state.current_scene or "未设定"}
 会话次数: 第 {self.game_state.session_number} 章
 
-请作为 TRPG 的 KP/主持人，引导玩家进行冒险。
-保持剧情连贯性，适当设置悬念和挑战。
-当玩家请求投骰时，请使用 /roll 命令。
+作为 TRPG 的 KP，引导玩家冒险。保持剧情连贯，适当设置悬念和挑战。
 
-【回复格式要求 - 必须严格遵守】
-你的每次回复必须使用以下标记来组织内容，让玩家能清晰分辨不同类型的信息：
+【回复规则 — 必须严格遵守】
+用以下标记组织回复。精炼简洁，直击重点：
 
-[DESC]环境描写、场景氛围、叙事性描述[/DESC]
-[ACTION]玩家角色的行动结果、你做了什么、检定结果[/ACTION]
-[NPC]NPC的行动、对话、反应[/NPC]
-[EVENT]环境变化、突发事件、新线索出现[/EVENT]
-[STATUS]角色状态变化提醒（HP增减、属性变化、获得物品等）[/STATUS]
+[DESC]环境氛围（1-2句，精炼）[/DESC]
+[ACTION]玩家行动结果、检定（仅关键数据）[/ACTION]
+[NPC]NPC言行（出现时写，精简）[/NPC]
+[EVENT]突发事件、新线索（发生时写）[/EVENT]
+[STATUS]角色状态变化（HP/属性/物品变化时写）[/STATUS]
 
-格式规则：
-1. 每个段落必须用对应的标记包裹
-2. 可以省略不需要的标记（如本轮没有NPC动作就不写[NPC]）
-3. 标记必须是英文大写，成对出现（开始和结束）
-4. 多个同类内容可以放在同一个标记块内
-5. 示例回复格式：
-[DESC]幽暗的走廊尽头传来低沉的呼吸声，墙上的火把摇曳不定...[/DESC]
-[ACTION]你小心翼翼地推开房门，敏捷检定成功(DC 15, 掷出18)。房间里堆满了古老的书籍。[/ACTION]
-[STATUS]你的理智值因目睹不可名状之物而动摇。[/STATUS]
+整体要求：
+- 可以省略未用到的标记，不必全部出现
+- 每个标记块2-4句足矣，整体回复控制在300字以内
+- 避免冗长的环境铺陈和重复描述，直接推进剧情
 
 【行动建议】
-在回复的最末尾，根据当前剧情给出3-4个具体、贴合场景的行动建议，格式为：
+回复末尾给出3个贴合场景的具体行动建议：
 [SUGGESTIONS: 建议1 | 建议2 | 建议3]
-建议要具体且有针对性，不要泛泛而谈。例如：
-[SUGGESTIONS: 调查书桌上的笔记 | 与酒馆老板打听消息 | 悄悄尾随可疑的商人]
 """
         return base_prompt + char_info_text + stats_text + player_info if base_prompt else char_info_text + stats_text + player_info
 

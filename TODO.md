@@ -237,6 +237,32 @@
 
 ---
 
+- [x] **UI/UX 精细化修复** ⭐ 新增
+  - KP 统一称呼（GM → KP）
+  - 分支对话 AI 人设独立（轻松闲聊风格、流式输出）
+  - 主线 KP 回复精炼化（每块2-4句、整体300字以内、直击重点）
+  - 角色身份被 AI 正确识别（系统提示词强调角色是谁、预设剧本去硬编码角色名）
+  - 左侧面板新增背包栏（装备/道具展示，Character 模型新增 equipment JSON 字段）
+  - 完成时间: 2026-05-15
+
+- [x] **WebSocket 消息重复修复**
+  - 根因: React Strict Mode 双重挂载导致两条 WebSocket 连接同时活跃
+  - 修复: `websocket.ts` connect()/disconnect() 中设置 `onclose=null` 阻止重连竞态
+  - 完成时间: 2026-05-15
+
+- [x] **战役删除 Bug 修复**
+  - 根因: SQLAlchemy ORM backref 尝试 `SET NULL` 到 `chat_branches.campaign_id`（NOT NULL 列）
+  - 修复: `campaigns.py` 改用纯 SQL bulk delete，按外键依赖顺序删除（SessionLog → ChatBranch → Save → Campaign）
+  - 完成时间: 2026-05-15
+
+- [x] **战役时间显示与排序**
+  - Campaign 模型新增 `last_played_at` 字段，WebSocket 连接时自动更新
+  - Dashboard 显示创建时间和上次游玩时间
+  - 战役列表按 `updated_at desc` 排序
+  - 完成时间: 2026-05-15
+
+---
+
 ## P1 — 用户体验优化
 
 ### 6. 战斗判定接入聊天流 ⚔️

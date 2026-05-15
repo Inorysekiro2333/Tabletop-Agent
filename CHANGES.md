@@ -1,5 +1,85 @@
 # 修改记录
 
+## 2026-05-15 — UI/UX 精细化修复 & Bug 修复
+
+### GM → KP 统一称呼
+- 前端 ChatRoom 中所有 "GM" 引用改为 "KP"
+- 预设剧本中 `类似 GM` → `类似 KP`
+
+### 分支对话 AI 人设独立 + 流式输出
+**后端：**
+- `chat.py` `handle_branch_message` 完全重写：分支 AI 使用独立 casual persona（"你不是 KP，你是冒险伙伴"），口语化、接地气、用"我"自称
+- 主线历史作为 system reference 注入（而非 conversation messages），避免分支 AI 模仿主线 KP 的正式风格
+- 分支消息流式输出（`branch_kp_thinking` + `branch_kp_thinking_chunk` + `branch_kp_response`）
+
+**前端：**
+- `ChatRoom.tsx` 处理 `branch_kp_thinking`/`branch_kp_thinking_chunk` 消息类型，分支消息流式渲染 + 光标动画
+- `websocket.ts` ChatMessage 新增 `branch_kp_thinking`/`branch_kp_thinking_chunk` 类型
+- 分支消息标签改为 `💬 闲聊`
+
+### 主线 KP 回复精炼化
+- `chat_session.py` `get_full_system_prompt()` 新增约束：每块 2-4 句，整体 300 字以内，避免冗长环境铺陈
+
+### 角色身份识别增强
+- `chat_session.py` system prompt 强调角色身份："你就是这个角色，严格依据角色信息回应，不要把预设剧本中的角色名字强加给玩家"
+- `presets.ts` 去硬编码主角名：CoC 移除"文森特"，修仙移除"林渡"，开场白/系统提示词使用 `{玩家}` 或泛称
+
+### 背包/物品栏
+**后端：**
+- `models/character.py` Character 新增 `equipment = Column(JSON, default=list)`
+- `schemas/character.py` CharacterCreate/Update/Response 新增 `equipment` 字段
+- `routers/characters.py` 读写 `equipment` 字段
+- `chat_session.py` 角色信息区段显示装备列表
+
+**前端：**
+- `api.ts` Character 接口新增 `equipment: string[]`
+- `ChatRoom.tsx` 左侧面板新增背包栏（traits 下方、快速投骰上方）
+- `ChatRoom.css` 新增 `.inventory-list`/`.inventory-item`/`.inventory-empty` 样式
+
+**数据库：** `ALTER TABLE characters ADD COLUMN equipment JSON NULL`
+
+### 战役删除修复
+- `routers/campaigns.py` 改用纯 SQL bulk delete（按外键依赖顺序：SessionLog → ChatBranch → Save → Campaign），避免 ORM backref 尝试 SET NULL 到 NOT NULL 列
+
+### 战役时间显示
+**后端：**
+- `models/campaign.py` Campaign 新增 `last_played_at` 字段
+- `schemas/campaign.py` CampaignResponse 新增 `last_played_at`
+- `routers/chat.py` WebSocket 连接时更新 `campaign.last_played_at = datetime.utcnow()`
+- `routers/campaigns.py` list 端点按 `updated_at desc` 排序
+
+**前端：**
+- `api.ts` Campaign 接口新增 `last_played_at`
+- `Dashboard.tsx` 战役卡片和列表显示创建时间 + 上次游玩时间
+- `Dashboard.css` 新增 `.active-campaign-meta` 样式
+
+**数据库：** `ALTER TABLE campaigns ADD COLUMN last_played_at DATETIME NULL`
+
+### WebSocket 重复连接修复
+- `websocket.ts` `connect()` 关闭已有连接时设置 `onclose=null` 阻止重连竞态
+- `disconnect()` 同样设置 `onclose=null` 阻止重连
+
+### 影响范围
+| 层级 | 文件 | 变更类型 |
+|------|------|----------|
+| Backend | `models/campaign.py` | 增强（last_played_at） |
+| Backend | `models/character.py` | 增强（equipment） |
+| Backend | `routers/campaigns.py` | 修复（删除级联）+ 增强（排序） |
+| Backend | `routers/characters.py` | 增强（equipment） |
+| Backend | `routers/chat.py` | 增强（分支流式 + 时间追踪） |
+| Backend | `schemas/campaign.py` | 增强（last_played_at） |
+| Backend | `schemas/character.py` | 增强（equipment） |
+| Backend | `services/chat_session.py` | 增强（精炼约束 + 角色身份 + 装备） |
+| Frontend | `services/api.ts` | 增强（equipment + last_played_at） |
+| Frontend | `services/websocket.ts` | 修复（重连竞态）+ 增强（分支流式类型） |
+| Frontend | `pages/ChatRoom.tsx` | 增强（分支流式 + 背包 + KP 标签） |
+| Frontend | `pages/ChatRoom.css` | 增强（背包样式） |
+| Frontend | `pages/Dashboard.tsx` | 增强（时间显示） |
+| Frontend | `pages/Dashboard.css` | 增强（时间样式） |
+| Frontend | `data/presets.ts` | 修复（去硬编码角色名 + GM→KP） |
+
+---
+
 ## 2026-05-15 — P0 核心体验开发
 
 ### P0-1: 角色卡数据注入 AI 上下文

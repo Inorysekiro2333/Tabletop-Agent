@@ -218,6 +218,10 @@ async def websocket_chat(websocket: WebSocket, campaign_id: int, token: str = No
             await websocket.close(code=4003, reason="Campaign not found")
             return
 
+        # 更新最近游玩时间
+        campaign.last_played_at = datetime.utcnow()
+        db.commit()
+
         # 获取或创建会话
         session = ChatSessionManager.get_or_create_session(campaign_id)
 
@@ -261,7 +265,7 @@ async def websocket_chat(websocket: WebSocket, campaign_id: int, token: str = No
                 "attributes": character.attributes or {},
                 "hp": character.hp or 10,
                 "ac": character.ac or 10,
-                "equipment": getattr(character, 'equipment', '') or '',
+                "equipment": character.equipment or [],
             }
             session.set_selected_character(char_data)
 
@@ -363,7 +367,7 @@ async def handle_select_character(
                 "attributes": character.attributes or {},
                 "hp": character.hp or 10,
                 "ac": character.ac or 10,
-                "equipment": getattr(character, 'equipment', '') or '',
+                "equipment": character.equipment or [],
             }
             session.set_selected_character(char_data)
             await websocket.send_json({
@@ -467,7 +471,7 @@ async def handle_branch_message(
     content: str,
     session: ChatSession
 ):
-    """处理分支对话消息 —— 独立于主线，但带主线记忆"""
+    """处理分支对话消息 —— 独立于主线，但带主线记忆，流式输出，轻松闲聊人设"""
     if not session.ai_config_id:
         await websocket.send_json({
             "type": "branch_system",
@@ -482,23 +486,61 @@ async def handle_branch_message(
         if not ai_config:
             return
 
-        # 构建上下文：主线记忆 + 分支消息
-        messages = [{"role": "system", "content": session.get_full_system_prompt()}]
-        # 注入主线记忆摘要（最近的上下文）
+        # 分支人设：像朋友闲聊，区别于主线 KP 的严肃风格
+        char_name = session.game_state.character_name or "玩家"
+        char_stats = session.game_state.character_stats
+        stats_summary = f"HP:{char_stats.get('hp','?')} AC:{char_stats.get('ac','?')} LV:{char_stats.get('level','?')}" if char_stats else ""
+
+        branch_system_prompt = f"""你现在不是KP，你是 {char_name} 的冒险伙伴，正在和 {char_name} 私下闲聊。你知道主线故事的所有进展，但你可以自由地讨论、吐槽、出主意。
+
+【你的说话方式 — 必须严格遵守】
+- 用"我"来称呼自己，就像朋友聊天一样
+- 口语化、接地气，不要任何正式的书面语
+- 可以给出主观建议（"我觉得..."、"我建议你..."）
+- 可以吐槽NPC（"那个矮人老板好可疑"）
+- 可以分析局势（"你要是现在动手，可能会..."）
+- 可以反问对方（"要不然换个思路？"）
+- 说话像真人，每句不要太长，2-4句一个回合
+
+【参考聊天风格】
+玩家问：kp，这里我如果发动偷袭会怎么样？
+你回答：根据现在的情况，我其实不太建议你偷袭。首先这个npc是关键人物，偷袭成功的话你会丢失重要信息。其次你现在的属性({stats_summary})，会进行判定，如果判定失败会损失生命，并且失去这个npc的信任，得不偿失。要不然换个方向试试？
+
+【你的知识】
+- 你知道主线剧情的一切
+- 你知道 {char_name} 的角色数据和状态（{stats_summary}）
+- 你知道所有NPC的情况
+- 你可以结合这些信息给出有建设性的建议
+- 但你不直接操控游戏，只是给朋友出主意
+
+记住：你不是严肃的主持人，你是一个熟知内情的朋友。用最自然的语气说话。不要长篇大论。"""
+
+        # 构建上下文
+        messages = [{"role": "system", "content": branch_system_prompt}]
+        # 注入主线记忆摘要（作为参考信息，不是对话历史）
         main_history = session.get_messages_for_ai(max_history=30)
         if main_history:
+            # 将历史转为系统参考信息，避免分支AI模仿主线KP的正式口吻
+            history_summary = "\n".join([
+                f"[{'玩家' if m['role'] == 'user' else '主线KP'}]: {m['content'][:200]}"
+                for m in main_history[-8:]
+            ])
             messages.append({
                 "role": "system",
-                "content": "【主线剧情记忆 — 以下是主线中的关键对话，作为你回答分支问题时的背景参考】"
-            })
-            messages.extend(main_history[-10:])  # Last 10 messages from main as context
-            messages.append({
-                "role": "system",
-                "content": "【现在是分支闲聊 — 以下对话独立于主线，不影响主线剧情。请以轻松、自由的方式回应玩家的闲聊】"
+                "content": f"【主线剧情摘要 — 以下是你知道的剧情，但要按你的闲聊风格回复，不要模仿主线KP的口吻】\n{history_summary}"
             })
         messages.append({"role": "user", "content": content})
 
-        # 调用 AI（非流式，简化分支体验）
+        thinking_id = str(uuid.uuid4())
+
+        # 发送思考中状态
+        await websocket.send_json({
+            "type": "branch_kp_thinking",
+            "id": thinking_id,
+            "content": "分支 KP 思考中..."
+        })
+
+        # 流式调用 AI
         full_response = ""
         async for chunk in AIGateway.chat_stream(
             provider_name=ai_config.provider.value.lower(),
@@ -508,9 +550,15 @@ async def handle_branch_message(
             base_url=ai_config.base_url
         ):
             full_response += chunk
+            await websocket.send_json({
+                "type": "branch_kp_thinking_chunk",
+                "id": thinking_id,
+                "content": chunk
+            })
 
         await websocket.send_json({
             "type": "branch_kp_response",
+            "thinking_id": thinking_id,
             "role": "kp",
             "content": full_response
         })

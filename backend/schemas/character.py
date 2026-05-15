@@ -28,6 +28,7 @@ class CharacterCreate(BaseModel):
     hp: int = Field(default=10, ge=1)
     ac: int = Field(default=10, ge=1)
     skills: Optional[List[str]] = []
+    equipment: Optional[List[str]] = []
     backstory: Optional[str] = None
     personality: Optional[PersonalitySchema] = None
 
@@ -41,6 +42,7 @@ class CharacterUpdate(BaseModel):
     hp: Optional[int] = None
     ac: Optional[int] = None
     skills: Optional[List[str]] = None
+    equipment: Optional[List[str]] = None
     backstory: Optional[str] = None
     personality: Optional[PersonalitySchema] = None
 
@@ -56,6 +58,7 @@ class CharacterResponse(BaseModel):
     hp: int
     ac: int
     skills: List[str]
+    equipment: Optional[List[str]] = []
     backstory: Optional[str]
     personality: Dict[str, str]
     created_at: datetime

@@ -72,6 +72,7 @@ export interface Character {
   hp: number;
   ac: number;
   skills: string[];
+  equipment: string[];  // 背包物品列表
   backstory?: string;
   personality: Record<string, string>;
   created_at: string;
@@ -100,6 +101,7 @@ export interface Campaign {
   status: 'active' | 'archived';
   created_at: string;
   updated_at: string;
+  last_played_at: string | null;
 }
 
 export const campaignAPI = {

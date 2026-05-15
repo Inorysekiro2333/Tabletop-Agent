@@ -21,6 +21,7 @@ class Campaign(Base):
     system_prompt = Column(Text, nullable=True)
     current_session = Column(Integer, default=1)
     status = Column(SQLEnum(CampaignStatus), default=CampaignStatus.ACTIVE)
+    last_played_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

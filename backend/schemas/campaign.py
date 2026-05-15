@@ -31,6 +31,7 @@ class CampaignResponse(BaseModel):
     status: CampaignStatus
     created_at: datetime
     updated_at: datetime
+    last_played_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

@@ -263,6 +263,10 @@ export function Dashboard() {
                     <div className="active-campaign-desc">
                       {campaign.description || '暂无描述'} · 第 {campaign.current_session} 节
                     </div>
+                    <div className="active-campaign-meta">
+                      创建于 {new Date(campaign.created_at).toLocaleDateString()}
+                      {campaign.last_played_at && ` · 上次游玩 ${new Date(campaign.last_played_at).toLocaleDateString()}`}
+                    </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                     <Button
@@ -327,6 +331,10 @@ export function Dashboard() {
             }
           >
             <p>{campaign.description || '暂无描述'}</p>
+            <p style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 8 }}>
+              创建于 {new Date(campaign.created_at).toLocaleDateString()}
+              {campaign.last_played_at && ` · 最近游玩 ${new Date(campaign.last_played_at).toLocaleDateString()}`}
+            </p>
             <Tag color={campaign.status === 'active' ? 'green' : 'default'}>
               {campaign.status === 'active' ? '进行中' : '已归档'}
             </Tag>

@@ -6,6 +6,7 @@ from models.user import User
 from models.campaign import Campaign, CampaignStatus
 from models.ai_config import AIConfig
 from models.save import Save, SessionLog
+from models.chat_branch import ChatBranch
 from schemas.campaign import CampaignCreate, CampaignUpdate, CampaignResponse
 from utils.security import get_current_user
 
@@ -18,7 +19,7 @@ async def list_campaigns(
     db: Session = Depends(get_db)
 ):
     """List all campaigns for current user"""
-    campaigns = db.query(Campaign).filter(Campaign.user_id == current_user.id).all()
+    campaigns = db.query(Campaign).filter(Campaign.user_id == current_user.id).order_by(Campaign.updated_at.desc()).all()
     return campaigns
 
 
@@ -135,8 +136,10 @@ async def delete_campaign(
             detail="Campaign not found"
         )
 
-    # 先删除关联的存档和聊天记录
-    db.query(Save).filter(Save.campaign_id == campaign_id).delete()
+    # 按外键依赖顺序，使用纯 SQL 删除避免 ORM backref 级联问题
     db.query(SessionLog).filter(SessionLog.campaign_id == campaign_id).delete()
-    db.delete(campaign)
+    db.query(ChatBranch).filter(ChatBranch.campaign_id == campaign_id).delete()
+    db.query(Save).filter(Save.campaign_id == campaign_id).delete()
+    db.flush()  # 确保子记录删除先执行
+    db.query(Campaign).filter(Campaign.id == campaign_id).delete()
     db.commit()

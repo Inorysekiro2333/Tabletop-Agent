@@ -266,13 +266,33 @@ export function ChatRoom() {
     }
     // 分支消息 — 路由到分支面板
     else if (msg.type === 'branch_created') {
-      // 分支已创建，后续分支聊天消息会通过 branch_kp_response / branch_player_message 传递
       setBranchCreated(true);
       setBranchPanelOpen(true);
       setBranchPanelCollapsed(false);
       message.success('分支对话已创建，在右侧面板聊天');
+    } else if (msg.type === 'branch_kp_thinking') {
+      setBranchMessages((prev) => [
+        ...prev,
+        { ...msg, type: 'kp_response' as const, role: 'kp', content: '', timestamp: new Date().toISOString() },
+      ]);
+    } else if (msg.type === 'branch_kp_thinking_chunk') {
+      setBranchMessages((prev) =>
+        prev.map((m) =>
+          m.id === msg.id ? { ...m, content: (m.content || '') + msg.content } : m
+        )
+      );
     } else if (msg.type === 'branch_kp_response') {
-      setBranchMessages((prev) => [...prev, msg]);
+      if (msg.thinking_id) {
+        setBranchMessages((prev) =>
+          prev.map((m) =>
+            m.id === msg.thinking_id
+              ? { ...m, type: 'kp_response', role: 'kp', content: msg.content }
+              : m
+          )
+        );
+      } else {
+        setBranchMessages((prev) => [...prev, msg]);
+      }
     } else if (msg.type === 'branch_player_message') {
       setBranchMessages((prev) => [...prev, msg]);
     } else if (msg.type === 'branch_system') {
@@ -328,7 +348,6 @@ export function ChatRoom() {
 
   const handleSuggestionClick = (suggestion: string) => {
     setInputValue(suggestion);
-    setUsedSuggestions(prev => new Set(prev).add(suggestion));
     inputRef.current?.focus();
   };
 
@@ -415,19 +434,18 @@ export function ChatRoom() {
     if (presetSuggestionsRef.current.length > 0) {
       const hasPresetOpening = messages.some(m => m.id?.startsWith('preset-opening'));
       if (hasPresetOpening) {
-        const unused = presetSuggestionsRef.current.filter(s => !usedSuggestions.has(s));
-        if (unused.length > 0) return unused;
+        return presetSuggestionsRef.current;
       }
     }
     // Use AI-generated suggestions from the last KP message
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (m.type === 'kp_response' && m.suggestions && m.suggestions.length > 0) {
-        return m.suggestions.filter(s => !usedSuggestions.has(s));
+        return m.suggestions;
       }
     }
     return [];
-  }, [messages, usedSuggestions]);
+  }, [messages]);
 
   const showSuggestions = !isKPThinking && suggestionChips.length > 0 && messages.length > 0
     && messages[messages.length - 1]?.role === 'kp';
@@ -492,31 +510,31 @@ export function ChatRoom() {
     }
 
     const isPlayer = msg.role === 'player';
-    const isLastKP = !isPlayer && index === messages.length - 1 && msg.role === 'kp';
+    const isKP = msg.role === 'kp';
 
     return (
       <div key={index} className={`message ${msg.role}`}>
         <div className="message-role">
           {isPlayer
             ? selectedCharacter?.name || '玩家'
-            : `⚔ GM · ${campaign?.title || '暗幕'}`}
+            : `⚔ KP · ${campaign?.title || '暗幕'}`}
         </div>
         {isPlayer ? (
           <div className="message-content">{msg.content}</div>
         ) : (
           <div className={`message-content${isLastKpMessage ? ' streaming' : ''}`}>
             {renderFormattedContent(msg.content || '', isLastKpMessage)}
+            {/* Fork button INSIDE message-content so hover works */}
+            {isKP && msg.content && !isLastKpMessage && (
+              <button
+                className="fork-btn"
+                onClick={(e) => { e.stopPropagation(); handleForkFromMessage(index); }}
+                title="从当前创建分支对话"
+              >
+                <BranchesOutlined /> 从当前创建分支
+              </button>
+            )}
           </div>
-        )}
-        {/* Fork button — hover visible at bottom-right of KP messages */}
-        {isLastKP && (
-          <button
-            className="fork-btn"
-            onClick={() => handleForkFromMessage(index)}
-            title="从当前创建分支对话"
-          >
-            <BranchesOutlined /> 分支
-          </button>
         )}
       </div>
     );
@@ -611,6 +629,19 @@ export function ChatRoom() {
                     <span key={i} className="trait-tag">{s}</span>
                   ))}
                 </div>
+              </div>
+
+              <div className="char-section">
+                <div className="char-section-title">背包</div>
+                {selectedCharacter.equipment && selectedCharacter.equipment.length > 0 ? (
+                  <ul className="inventory-list">
+                    {selectedCharacter.equipment.map((item, i) => (
+                      <li key={i} className="inventory-item">{item}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="inventory-empty">空背包</div>
+                )}
               </div>
             </>
           ) : (
@@ -804,22 +835,28 @@ export function ChatRoom() {
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
                   />
                 ) : (
-                  branchMessages.map((msg, i) => (
+                  branchMessages.map((msg, i) => {
+                    const isLastBranchKp = msg.role === 'kp' && i === branchMessages.length - 1 && !msg.content;
+                    return (
                     <div key={i} className={`branch-msg ${msg.role}`}>
                       <div className="branch-msg-role">
                         {msg.role === 'player'
                           ? selectedCharacter?.name || '玩家'
-                          : '⚔ GM'}
+                          : '💬 闲聊'}
                       </div>
                       <div className="branch-msg-content">
                         {msg.role === 'kp' ? (
-                          <span dangerouslySetInnerHTML={{ __html: msg.content || '' }} />
+                          <span>
+                            <span dangerouslySetInnerHTML={{ __html: msg.content || '' }} />
+                            {isLastBranchKp && <span className="streaming-cursor" />}
+                          </span>
                         ) : (
                           msg.content
                         )}
                       </div>
                     </div>
-                  ))
+                    );
+                  })
                 )}
                 <div ref={branchMessagesEndRef} />
               </div>

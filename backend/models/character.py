@@ -17,6 +17,7 @@ class Character(Base):
     hp = Column(Integer, default=10)
     ac = Column(Integer, default=10)
     skills = Column(JSON, default=list)  # 技能列表
+    equipment = Column(JSON, default=list)  # 装备/背包物品列表
     backstory = Column(Text, nullable=True)
     personality = Column(JSON, default=dict)  # trait, ideal, bond, flaw
     created_at = Column(DateTime, server_default=func.now())

@@ -191,6 +191,43 @@
   font-family: var(--font-mono);
 }
 
+/* Inventory */
+.inventory-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.inventory-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+  border-radius: var(--radius-sm);
+  margin-bottom: 4px;
+}
+
+.inventory-item::before {
+  content: '🎒';
+  font-size: 12px;
+}
+
+.inventory-item:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.inventory-empty {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: 12px;
+}
+
 /* Quick dice in sidebar */
 .quick-dice {
   padding: 16px 20px;
@@ -820,38 +857,28 @@
 }
 
 /* -------------------------------------------------------------------------
-   Fork button on KP messages — appears on hover at bottom-right
+   Fork button on KP messages — inside the message card at the end
    ------------------------------------------------------------------------- */
-.message.kp {
-  position: relative;
-}
-
 .fork-btn {
-  display: none;
-  position: absolute;
-  bottom: -28px;
-  right: 8px;
-  padding: 3px 10px;
-  border: 1px solid oklch(55% 0.12 160 / 0.4);
-  border-radius: 4px;
-  background: var(--color-bg-card);
+  display: block;
+  margin-top: 10px;
+  padding: 5px 12px;
+  border: 1px solid oklch(55% 0.12 160 / 0.35);
+  border-radius: 6px;
+  background: oklch(55% 0.05 160 / 0.05);
   color: oklch(50% 0.1 160);
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
   transition: all var(--transition-fast);
   white-space: nowrap;
-  z-index: 2;
-}
-
-.message.kp:hover .fork-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  width: fit-content;
+  opacity: 0.5;
 }
 
 .fork-btn:hover {
+  opacity: 1;
   border-color: oklch(50% 0.12 160);
-  background: oklch(55% 0.1 160 / 0.1);
+  background: oklch(55% 0.1 160 / 0.12);
   color: oklch(45% 0.12 160);
 }
 

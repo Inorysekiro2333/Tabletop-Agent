@@ -17,7 +17,7 @@ from models.user import User
 from models.campaign import Campaign
 from models.character import Character
 from models.ai_config import AIConfig
-from models.save import SessionLog
+from models.save import Save, SessionLog
 from models.chat_branch import ChatBranch
 from utils.security import get_current_user, verify_token
 from services.ai_gateway import AIGateway
@@ -277,7 +277,7 @@ async def websocket_chat(websocket: WebSocket, campaign_id: int, token: str = No
     await websocket.send_json({
         "type": "system",
         "content": f"已连接到战役: {campaign.title}",
-        "timestamp": str(db.query(Campaign).get(campaign_id).created_at)
+        "timestamp": str(campaign.created_at) if campaign.created_at else ""
     })
 
     # 如果有历史消息（从数据库加载的），发送给前端
@@ -319,10 +319,8 @@ async def websocket_chat(websocket: WebSocket, campaign_id: int, token: str = No
                 await handle_save_game(websocket, campaign_id, user, message_data, session)
             elif msg_type == "branch_create":
                 await handle_branch_create(websocket, campaign_id, user, message_data, session)
-            elif msg_type == "branch_switch":
-                await handle_branch_switch(websocket, campaign_id, user, message_data, session)
-            elif msg_type == "branch_list":
-                await handle_branch_list(websocket, campaign_id, user, session)
+            elif msg_type == "branch_message":
+                await handle_branch_message(websocket, campaign_id, user, content, session)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket, campaign_id)
@@ -427,27 +425,15 @@ async def handle_branch_create(
     message_data: dict,
     session: ChatSession
 ):
-    """创建对话分支 —— P0-4"""
+    """创建对话分支 —— 新的侧边栏设计"""
     branch_name = message_data.get("content", f"分支 {datetime.utcnow().strftime('%H:%M')}")
-    parent_message_index = len(session.messages) - 1  # Fork from last message
 
     from database import SessionLocal
     db = SessionLocal()
     try:
-        # 创建分支记录
-        parent_msg_id = None
-        if parent_message_index >= 0 and parent_message_index < len(session.messages):
-            # 尝试获取对应的 SessionLog ID
-            from models.save import SessionLog
-            all_logs = db.query(SessionLog).filter(
-                SessionLog.campaign_id == campaign_id
-            ).order_by(SessionLog.id).all()
-            if parent_message_index < len(all_logs):
-                parent_msg_id = all_logs[parent_message_index].id
-
         branch = ChatBranch(
             campaign_id=campaign_id,
-            parent_message_id=parent_msg_id,
+            parent_message_id=len(session.messages),  # Fork point by message count
             name=branch_name,
             is_active=True
         )
@@ -455,34 +441,14 @@ async def handle_branch_create(
         db.commit()
         db.refresh(branch)
 
-        # 在会话中创建分支
-        session.create_branch(branch.id, parent_message_index)
-        session.switch_to_branch(branch.id)
+        # Store branch info in session for context isolation
+        session.create_branch(branch.id, len(session.messages) - 1)
 
-        # 停用其他分支
-        db.query(ChatBranch).filter(
-            ChatBranch.campaign_id == campaign_id,
-            ChatBranch.id != branch.id
-        ).update({"is_active": False})
-        db.commit()
-
-        # 通知前端
         await websocket.send_json({
             "type": "branch_created",
-            "content": f"已创建分支: {branch_name}",
-            "branch": {"id": branch.id, "name": branch.name, "is_active": True, "created_at": str(branch.created_at)}
+            "content": f"分支对话已创建，在右侧面板中与 AI 闲聊，不会影响主线剧情",
+            "branch": {"id": branch.id, "name": branch.name}
         })
-
-        # 重新发送当前分支的消息
-        for msg in session.messages:
-            await websocket.send_json({
-                "type": "kp_response" if msg.role == "kp" else "player_message",
-                "role": msg.role,
-                "content": msg.content
-            })
-
-        # 发送分支列表
-        await _broadcast_branch_list(websocket, campaign_id, db)
 
     except Exception as e:
         logger.error(f"创建分支失败: {e}")
@@ -494,105 +460,69 @@ async def handle_branch_create(
         db.close()
 
 
-async def handle_branch_switch(
+async def handle_branch_message(
     websocket: WebSocket,
     campaign_id: int,
     user: User,
-    message_data: dict,
+    content: str,
     session: ChatSession
 ):
-    """切换对话分支 —— P0-4"""
-    branch_id = message_data.get("branch_id")  # None = 主线
+    """处理分支对话消息 —— 独立于主线，但带主线记忆"""
+    if not session.ai_config_id:
+        await websocket.send_json({
+            "type": "branch_system",
+            "content": "未配置 AI"
+        })
+        return
 
     from database import SessionLocal
     db = SessionLocal()
     try:
-        # 保存当前分支消息到数据库
-        current_bid = session.current_branch_id
-        # (消息在 switch_to_branch 中已保存到 branch_messages)
+        ai_config = db.query(AIConfig).filter(AIConfig.id == session.ai_config_id).first()
+        if not ai_config:
+            return
 
-        # 切换到目标分支
-        session.switch_to_branch(branch_id)
-
-        # 更新激活状态
-        db.query(ChatBranch).filter(
-            ChatBranch.campaign_id == campaign_id
-        ).update({"is_active": False})
-        if branch_id:
-            db.query(ChatBranch).filter(ChatBranch.id == branch_id).update({"is_active": True})
-        db.commit()
-
-        # 通知前端
-        branch_name = "主线"
-        if branch_id:
-            branch = db.query(ChatBranch).filter(ChatBranch.id == branch_id).first()
-            branch_name = branch.name if branch else f"分支 {branch_id}"
-
-        # 清空前端消息
-        await websocket.send_json({
-            "type": "history_clear",
-            "content": ""
-        })
-
-        # 发送切换后的消息
-        for msg in session.messages:
-            await websocket.send_json({
-                "type": "kp_response" if msg.role == "kp" else "player_message",
-                "role": msg.role,
-                "content": msg.content
+        # 构建上下文：主线记忆 + 分支消息
+        messages = [{"role": "system", "content": session.get_full_system_prompt()}]
+        # 注入主线记忆摘要（最近的上下文）
+        main_history = session.get_messages_for_ai(max_history=30)
+        if main_history:
+            messages.append({
+                "role": "system",
+                "content": "【主线剧情记忆 — 以下是主线中的关键对话，作为你回答分支问题时的背景参考】"
             })
+            messages.extend(main_history[-10:])  # Last 10 messages from main as context
+            messages.append({
+                "role": "system",
+                "content": "【现在是分支闲聊 — 以下对话独立于主线，不影响主线剧情。请以轻松、自由的方式回应玩家的闲聊】"
+            })
+        messages.append({"role": "user", "content": content})
+
+        # 调用 AI（非流式，简化分支体验）
+        full_response = ""
+        async for chunk in AIGateway.chat_stream(
+            provider_name=ai_config.provider.value.lower(),
+            messages=messages,
+            model=ai_config.model_name,
+            api_key=ai_config.api_key,
+            base_url=ai_config.base_url
+        ):
+            full_response += chunk
 
         await websocket.send_json({
-            "type": "branch_switched",
-            "content": f"已切换到: {branch_name}",
-            "branch_id": branch_id
+            "type": "branch_kp_response",
+            "role": "kp",
+            "content": full_response
         })
-
-        await _broadcast_branch_list(websocket, campaign_id, db)
 
     except Exception as e:
-        logger.error(f"切换分支失败: {e}")
+        logger.error(f"分支消息处理失败: {e}")
         await websocket.send_json({
-            "type": "error",
-            "content": f"切换分支失败: {str(e)}"
+            "type": "branch_system",
+            "content": f"AI 响应失败: {str(e)}"
         })
     finally:
         db.close()
-
-
-async def handle_branch_list(
-    websocket: WebSocket,
-    campaign_id: int,
-    user: User,
-    session: ChatSession
-):
-    """获取分支列表 —— P0-4"""
-    from database import SessionLocal
-    db = SessionLocal()
-    try:
-        await _broadcast_branch_list(websocket, campaign_id, db)
-    finally:
-        db.close()
-
-
-async def _broadcast_branch_list(websocket: WebSocket, campaign_id: int, db):
-    """广播分支列表"""
-    branches = db.query(ChatBranch).filter(
-        ChatBranch.campaign_id == campaign_id
-    ).order_by(ChatBranch.created_at).all()
-
-    branch_list = [
-        {"id": b.id, "name": b.name, "is_active": b.is_active, "created_at": str(b.created_at)}
-        for b in branches
-    ]
-
-    # 添加主线
-    branch_list.insert(0, {"id": 0, "name": "主线", "is_active": True, "created_at": ""})
-
-    await websocket.send_json({
-        "type": "branch_list",
-        "branches": branch_list
-    })
 
 
 async def handle_player_message(
@@ -701,8 +631,10 @@ async def get_ai_response(campaign_id: int, session: ChatSession):
 
             logger.info(f"AI响应完成: chunk_count={chunk_count}, full_response长度={len(full_response)}, 前100字符: {repr(full_response[:100])}")
 
+            # 解析行动建议
+            cleaned_response, suggestions = ChatSession.parse_suggestions(full_response)
             # 解析角色状态变化
-            cleaned_response, char_updates = ChatSession.parse_character_updates(full_response)
+            cleaned_response, char_updates = ChatSession.parse_character_updates(cleaned_response)
             if char_updates:
                 logger.info(f"检测到角色状态变化: {char_updates}")
                 # 更新数据库中的角色
@@ -725,7 +657,8 @@ async def get_ai_response(campaign_id: int, session: ChatSession):
                 "type": "kp_response",
                 "thinking_id": thinking_id,
                 "role": "kp",
-                "content": cleaned_response
+                "content": cleaned_response,
+                "suggestions": suggestions
             })
 
             # 记录消息（存清理后的文本）

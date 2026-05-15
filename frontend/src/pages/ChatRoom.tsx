@@ -7,6 +7,10 @@ import {
   SaveOutlined,
   MenuOutlined,
   BulbOutlined,
+  BranchesOutlined,
+  CloseOutlined,
+  RightOutlined,
+  LeftOutlined,
 } from '@ant-design/icons';
 import { wsService, type ChatMessage } from '../services/websocket';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -18,44 +22,42 @@ import './ChatRoom.css';
 
 const QUICK_DICE = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'];
 
-/** Derive contextual suggestion chips from the KP's response text */
-function deriveSuggestions(content: string): string[] {
-  const lower = content.toLowerCase();
-  const suggestions: string[] = [];
+/** Parse formatted AI response into styled segments */
+interface FormattedSegment {
+  type: 'desc' | 'action' | 'npc' | 'event' | 'status' | 'text';
+  content: string;
+}
 
-  if (lower.includes('检定') || lower.includes('dc') || lower.includes('掷骰')) {
-    suggestions.push('掷骰进行检定');
-  }
-  if (lower.includes('观察') || lower.includes('侦查') || lower.includes('察觉') || lower.includes('搜索')) {
-    suggestions.push('我仔细观察周围环境');
-  }
-  if (lower.includes('对话') || lower.includes('交谈') || lower.includes('询问') || lower.includes('打听')) {
-    suggestions.push('我上前与对方交谈');
-  }
-  if (lower.includes('门') || lower.includes('房间') || lower.includes('前进') || lower.includes('探索')) {
-    suggestions.push('我继续向前探索');
-  }
-  if (lower.includes('物品') || lower.includes('检查') || lower.includes('调查') || lower.includes('搜查')) {
-    suggestions.push('我仔细检查这个物品');
-  }
-  if (lower.includes('战斗') || lower.includes('攻击') || lower.includes('怪物') || lower.includes('敌人')) {
-    suggestions.push('我准备武器迎战');
-  }
-  if (lower.includes('潜行') || lower.includes('隐藏') || lower.includes('悄悄') || lower.includes('躲')) {
-    suggestions.push('我尝试潜行靠近');
-  }
-  if (lower.includes('法术') || lower.includes('施法') || lower.includes('魔法') || lower.includes('咒语')) {
-    suggestions.push('我施展法术');
+function parseFormattedContent(content: string): FormattedSegment[] {
+  const segments: FormattedSegment[] = [];
+  const markerRegex = /\[(DESC|ACTION|NPC|EVENT|STATUS)\]([\s\S]*?)\[\/\1\]/g;
+  let lastIndex = 0;
+
+  const matches: Array<{ index: number; length: number; type: string; content: string }> = [];
+  let match;
+  while ((match = markerRegex.exec(content)) !== null) {
+    matches.push({ index: match.index, length: match[0].length, type: match[1].toLowerCase(), content: match[2].trim() });
   }
 
-  // Fallback — always provide some actions
-  suggestions.push('我环顾四周寻找线索');
-  suggestions.push('我查看身上的装备和物品');
-  suggestions.push('我向KP询问更多细节');
+  if (matches.length === 0) {
+    return [{ type: 'text', content }];
+  }
 
-  // Deduplicate and limit
-  const unique = [...new Set(suggestions)];
-  return unique.slice(0, 5);
+  for (const m of matches) {
+    if (m.index > lastIndex) {
+      const before = content.slice(lastIndex, m.index).trim();
+      if (before) segments.push({ type: 'text', content: before });
+    }
+    segments.push({ type: m.type as FormattedSegment['type'], content: m.content });
+    lastIndex = m.index + m.length;
+  }
+
+  if (lastIndex < content.length) {
+    const after = content.slice(lastIndex).trim();
+    if (after) segments.push({ type: 'text', content: after });
+  }
+
+  return segments;
 }
 
 export function ChatRoom() {
@@ -76,12 +78,16 @@ export function ChatRoom() {
   const [diceOverlay, setDiceOverlay] = useState<{ die: string; result: number; max: number } | null>(null);
   const [usedSuggestions, setUsedSuggestions] = useState<Set<string>>(new Set());
   const [isKPThinking, setIsKPThinking] = useState(false);
-  const [branches, setBranches] = useState<Array<{id: number; name: string; is_active: boolean; created_at: string}>>([]);
-  const [currentBranchId, setCurrentBranchId] = useState<number | null>(null);
-  const [branchModalVisible, setBranchModalVisible] = useState(false);
-  const [branchName, setBranchName] = useState('');
+  // 分支侧边栏
+  const [branchPanelOpen, setBranchPanelOpen] = useState(false);
+  const [branchPanelCollapsed, setBranchPanelCollapsed] = useState(false);
+  const [branchMessages, setBranchMessages] = useState<ChatMessage[]>([]);
+  const [branchInputValue, setBranchInputValue] = useState('');
+  const [branchCreated, setBranchCreated] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const branchMessagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<InputRef>(null);
+  const branchInputRef = useRef<InputRef>(null);
   const skipBackendInitRef = useRef(true);
   const usePresetRef = useRef(false);
   const presetSuggestionsRef = useRef<string[]>([]);
@@ -91,7 +97,6 @@ export function ChatRoom() {
       const res = await campaignAPI.get(Number(campaignId));
       setCampaign(res.data);
 
-      // Check if this campaign uses a preset system prompt
       const preset = PRESETS.find(p => p.systemPrompt === res.data.system_prompt);
       if (preset) {
         usePresetRef.current = true;
@@ -138,7 +143,6 @@ export function ChatRoom() {
   };
 
   const handleOnMessage = useCallback((msg: ChatMessage) => {
-    // Skip backend-generated initial messages when using preset opening
     if (skipBackendInitRef.current) {
       if (msg.type === 'system' || msg.type === 'kp_thinking' || msg.type === 'kp_thinking_chunk') {
         return;
@@ -147,7 +151,6 @@ export function ChatRoom() {
         skipBackendInitRef.current = false;
         setIsKPThinking(false);
         if (usePresetRef.current) return;
-        // For custom campaigns, fall through to normal processing
       }
       if (msg.type === 'player_message' || msg.type === 'dice_result') {
         skipBackendInitRef.current = false;
@@ -165,25 +168,20 @@ export function ChatRoom() {
       );
     } else if (msg.type === 'kp_response') {
       setIsKPThinking(false);
-      // Clear preset suggestions once backend takes over
       presetSuggestionsRef.current = [];
       if (msg.thinking_id) {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === msg.thinking_id
-              ? { ...m, type: 'kp_response', role: 'kp', content: msg.content }
+              ? { ...m, type: 'kp_response', role: 'kp', content: msg.content, suggestions: msg.suggestions }
               : m
           )
         );
       } else {
         setMessages((prev) => [...prev, msg]);
       }
-      // Reset suggestion state for new KP message
       setUsedSuggestions(new Set());
-    } else if (
-      msg.type === 'player_message' ||
-      msg.type === 'dice_result'
-    ) {
+    } else if (msg.type === 'player_message' || msg.type === 'dice_result') {
       setMessages((prev) => [...prev, msg]);
     } else if (msg.type === 'kp_thinking') {
       setIsKPThinking(true);
@@ -233,7 +231,6 @@ export function ChatRoom() {
       ]);
     } else if (msg.type === 'save_loaded') {
       message.success(msg.content);
-      // 恢复角色状态
       if (msg.character_stats) {
         setSelectedCharacter((prev) => {
           if (!prev) return prev;
@@ -266,14 +263,20 @@ export function ChatRoom() {
     } else if (msg.type === 'save_created') {
       message.success(msg.content);
       loadSaves();
-    } else if (msg.type === 'branch_list') {
-      if (msg.branches) setBranches(msg.branches);
-    } else if (msg.type === 'branch_created') {
-      message.success(msg.content);
-      setCurrentBranchId(msg.branch?.id ?? null);
-    } else if (msg.type === 'branch_switched') {
-      message.success(msg.content);
-      setCurrentBranchId(msg.branch_id ?? null);
+    }
+    // 分支消息 — 路由到分支面板
+    else if (msg.type === 'branch_created') {
+      // 分支已创建，后续分支聊天消息会通过 branch_kp_response / branch_player_message 传递
+      setBranchCreated(true);
+      setBranchPanelOpen(true);
+      setBranchPanelCollapsed(false);
+      message.success('分支对话已创建，在右侧面板聊天');
+    } else if (msg.type === 'branch_kp_response') {
+      setBranchMessages((prev) => [...prev, msg]);
+    } else if (msg.type === 'branch_player_message') {
+      setBranchMessages((prev) => [...prev, msg]);
+    } else if (msg.type === 'branch_system') {
+      setBranchMessages((prev) => [...prev, { ...msg, type: 'system', role: 'system' }]);
     }
   }, []);
 
@@ -310,6 +313,10 @@ export function ChatRoom() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    branchMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [branchMessages]);
 
   const handleSend = () => {
     if (!inputValue.trim() || !connected) return;
@@ -363,32 +370,48 @@ export function ChatRoom() {
   const closeSidebar = () => setSidebarOpen(false);
 
   // ── 分支操作 ──
-  const handleCreateBranch = () => {
-    if (!branchName.trim()) {
-      message.warning('请输入分支名称');
-      return;
-    }
-    if (!connected) return;
-    wsService.createBranch(branchName);
-    setBranchModalVisible(false);
-    setBranchName('');
-  };
-
-  const handleSwitchBranch = (branchId: number | null) => {
-    if (!connected) return;
-    wsService.switchBranch(branchId);
-    setCurrentBranchId(branchId);
-  };
-
   const handleForkFromMessage = (msgIndex: number) => {
-    // Fork from the selected message — create branch with that message as context
-    setBranchName(`分支 (${new Date().toLocaleTimeString()})`);
-    setBranchModalVisible(true);
+    if (!connected) return;
+    wsService.createBranch(`分支 ${new Date().toLocaleTimeString()}`);
   };
 
-  // Compute suggestion chips from the last KP message
+  const handleBranchSend = () => {
+    if (!branchInputValue.trim() || !connected) return;
+    wsService.sendBranchMessage(branchInputValue);
+    // Optimistic add
+    setBranchMessages((prev) => [
+      ...prev,
+      { type: 'player_message', role: 'player', content: branchInputValue, timestamp: new Date().toISOString() },
+    ]);
+    setBranchInputValue('');
+    branchInputRef.current?.focus();
+  };
+
+  const handleBranchKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleBranchSend();
+    }
+  };
+
+  const handleToggleBranchPanel = () => {
+    if (branchPanelCollapsed) {
+      setBranchPanelCollapsed(false);
+      setBranchPanelOpen(true);
+    } else {
+      setBranchPanelCollapsed(true);
+    }
+  };
+
+  const handleCloseBranch = () => {
+    setBranchPanelOpen(false);
+    setBranchPanelCollapsed(false);
+    setBranchMessages([]);
+    setBranchCreated(false);
+  };
+
+  // Compute suggestion chips from the last KP message (AI-generated)
   const suggestionChips = useMemo(() => {
-    // If preset suggestions are available and preset opening is still the latest KP
     if (presetSuggestionsRef.current.length > 0) {
       const hasPresetOpening = messages.some(m => m.id?.startsWith('preset-opening'));
       if (hasPresetOpening) {
@@ -396,25 +419,41 @@ export function ChatRoom() {
         if (unused.length > 0) return unused;
       }
     }
-    // Walk backwards to find the last KP response
+    // Use AI-generated suggestions from the last KP message
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
-      if (m.type === 'kp_response' && m.content) {
-        return deriveSuggestions(m.content).filter(s => !usedSuggestions.has(s));
+      if (m.type === 'kp_response' && m.suggestions && m.suggestions.length > 0) {
+        return m.suggestions.filter(s => !usedSuggestions.has(s));
       }
     }
     return [];
   }, [messages, usedSuggestions]);
 
-  // Show suggestions only after KP has finished responding
   const showSuggestions = !isKPThinking && suggestionChips.length > 0 && messages.length > 0
     && messages[messages.length - 1]?.role === 'kp';
 
-  const renderMessage = (msg: ChatMessage, index: number) => {
-    const isLastKpMessage = msg.role === 'kp' && isKPThinking
-      && index === messages.length - 1;
+  const renderFormattedContent = (content: string, isStreaming: boolean) => {
+    const segments = parseFormattedContent(content);
+    return (
+      <>
+        {segments.map((seg, i) => {
+          if (seg.type === 'text') {
+            return <span key={i} dangerouslySetInnerHTML={{ __html: seg.content }} />;
+          }
+          return (
+            <span key={i} className={`fm-seg fm-${seg.type}`}>
+              <span className="fm-seg-content" dangerouslySetInnerHTML={{ __html: seg.content }} />
+            </span>
+          );
+        })}
+        {isStreaming && <span className="streaming-cursor" />}
+      </>
+    );
+  };
 
-    // Dice result
+  const renderMessage = (msg: ChatMessage, index: number) => {
+    const isLastKpMessage = msg.role === 'kp' && isKPThinking && index === messages.length - 1;
+
     if (msg.type === 'dice_result') {
       return (
         <div key={index} className="message dice-result">
@@ -444,7 +483,6 @@ export function ChatRoom() {
       );
     }
 
-    // System / Error
     if (msg.type === 'system') {
       return (
         <div key={index} className="message system">
@@ -453,33 +491,31 @@ export function ChatRoom() {
       );
     }
 
-    // Player / KP messages
     const isPlayer = msg.role === 'player';
-    const isBranchMsg = currentBranchId !== null;
+    const isLastKP = !isPlayer && index === messages.length - 1 && msg.role === 'kp';
+
     return (
-      <div key={index} className={`message ${msg.role}${isBranchMsg ? ' branch-msg' : ''}`}>
+      <div key={index} className={`message ${msg.role}`}>
         <div className="message-role">
           {isPlayer
             ? selectedCharacter?.name || '玩家'
             : `⚔ GM · ${campaign?.title || '暗幕'}`}
-          {isBranchMsg && <span className="branch-tag">分支</span>}
         </div>
         {isPlayer ? (
           <div className="message-content">{msg.content}</div>
         ) : (
           <div className={`message-content${isLastKpMessage ? ' streaming' : ''}`}>
-            <span dangerouslySetInnerHTML={{ __html: msg.content || '' }} />
-            {isLastKpMessage && <span className="streaming-cursor" />}
+            {renderFormattedContent(msg.content || '', isLastKpMessage)}
           </div>
         )}
-        {/* Fork button on non-player messages */}
-        {!isPlayer && msg.role === 'kp' && (
+        {/* Fork button — hover visible at bottom-right of KP messages */}
+        {isLastKP && (
           <button
             className="fork-btn"
             onClick={() => handleForkFromMessage(index)}
-            title="从此消息创建分支"
+            title="从当前创建分支对话"
           >
-            ↩
+            <BranchesOutlined /> 分支
           </button>
         )}
       </div>
@@ -536,30 +572,15 @@ export function ChatRoom() {
               <div className="char-section">
                 <div className="char-section-title">属性</div>
                 <div className="stat-mini-grid">
-                  <div className="stat-mini">
-                    <div className="sm-val">{selectedCharacter.attributes?.STR ?? '—'}</div>
-                    <div className="sm-lbl">力量</div>
-                  </div>
-                  <div className="stat-mini">
-                    <div className="sm-val">{selectedCharacter.attributes?.DEX ?? '—'}</div>
-                    <div className="sm-lbl">敏捷</div>
-                  </div>
-                  <div className="stat-mini">
-                    <div className="sm-val">{selectedCharacter.attributes?.CON ?? '—'}</div>
-                    <div className="sm-lbl">体质</div>
-                  </div>
-                  <div className="stat-mini">
-                    <div className="sm-val">{selectedCharacter.attributes?.INT ?? '—'}</div>
-                    <div className="sm-lbl">智力</div>
-                  </div>
-                  <div className="stat-mini">
-                    <div className="sm-val">{selectedCharacter.attributes?.WIS ?? '—'}</div>
-                    <div className="sm-lbl">感知</div>
-                  </div>
-                  <div className="stat-mini">
-                    <div className="sm-val">{selectedCharacter.attributes?.CHA ?? '—'}</div>
-                    <div className="sm-lbl">魅力</div>
-                  </div>
+                  {(['STR','DEX','CON','INT','WIS','CHA'] as const).map(attr => {
+                    const labels: Record<string, string> = {STR:'力量',DEX:'敏捷',CON:'体质',INT:'智力',WIS:'感知',CHA:'魅力'};
+                    return (
+                      <div key={attr} className="stat-mini">
+                        <div className="sm-val">{selectedCharacter.attributes?.[attr] ?? '—'}</div>
+                        <div className="sm-lbl">{labels[attr]}</div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -668,30 +689,6 @@ export function ChatRoom() {
                 </Select.Option>
               ))}
             </Select>
-            {/* 分支选择器 */}
-            {branches.length > 0 && (
-              <Select
-                value={currentBranchId}
-                onChange={(id) => handleSwitchBranch(id ?? null)}
-                placeholder="分支"
-                style={{ width: 110 }}
-                size="small"
-                className={currentBranchId ? 'branch-select active-branch' : 'branch-select'}
-              >
-                {branches.map((b) => (
-                  <Select.Option key={b.id} value={b.id || undefined}>
-                    {b.name}
-                  </Select.Option>
-                ))}
-              </Select>
-            )}
-            <Button
-              size="small"
-              onClick={() => setBranchModalVisible(true)}
-              title="创建分支"
-            >
-              分支
-            </Button>
             <button
               className="theme-toggle-btn"
               onClick={toggleTheme}
@@ -725,7 +722,7 @@ export function ChatRoom() {
             messages.map((msg, i) => renderMessage(msg, i))
           )}
 
-          {/* Suggestion chips */}
+          {/* AI-generated suggestion chips */}
           {showSuggestions && (
             <div className="suggestions">
               {suggestionChips.map(s => (
@@ -766,7 +763,94 @@ export function ChatRoom() {
         </div>
       </div>
 
-      {/* Dice Overlay — matching OD dramatic style */}
+      {/* ── 分支聊天侧边面板 (右) ── */}
+      {branchPanelOpen && (
+        <div className={`branch-panel ${branchPanelCollapsed ? 'collapsed' : ''}`}>
+          {branchPanelCollapsed ? (
+            // Collapsed state — thin bar at right edge
+            <div className="branch-collapsed-bar" onClick={handleToggleBranchPanel}>
+              <LeftOutlined className="branch-toggle-icon" />
+              <span className="branch-collapsed-label">分支对话</span>
+            </div>
+          ) : (
+            // Expanded state
+            <>
+              <div className="branch-panel-header">
+                <div className="branch-panel-title">
+                  <BranchesOutlined /> 分支对话
+                </div>
+                <div className="branch-panel-actions">
+                  <button
+                    className="branch-collapse-btn"
+                    onClick={handleToggleBranchPanel}
+                    title="折叠分支面板"
+                  >
+                    <RightOutlined />
+                  </button>
+                  <button
+                    className="branch-close-btn"
+                    onClick={handleCloseBranch}
+                    title="关闭分支"
+                  >
+                    <CloseOutlined />
+                  </button>
+                </div>
+              </div>
+
+              <div className="branch-panel-messages">
+                {branchMessages.length === 0 ? (
+                  <Empty
+                    description="在分支中与 AI 对话，不会影响主线剧情"
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  />
+                ) : (
+                  branchMessages.map((msg, i) => (
+                    <div key={i} className={`branch-msg ${msg.role}`}>
+                      <div className="branch-msg-role">
+                        {msg.role === 'player'
+                          ? selectedCharacter?.name || '玩家'
+                          : '⚔ GM'}
+                      </div>
+                      <div className="branch-msg-content">
+                        {msg.role === 'kp' ? (
+                          <span dangerouslySetInnerHTML={{ __html: msg.content || '' }} />
+                        ) : (
+                          msg.content
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+                <div ref={branchMessagesEndRef} />
+              </div>
+
+              <div className="branch-panel-input">
+                <div className="input-row">
+                  <Input
+                    ref={branchInputRef}
+                    value={branchInputValue}
+                    onChange={(e) => setBranchInputValue(e.target.value)}
+                    onKeyPress={handleBranchKeyPress}
+                    placeholder="在分支中闲聊……（不影响主线）"
+                    disabled={!connected}
+                    className="chat-input"
+                  />
+                  <button
+                    className="send-btn branch-send"
+                    onClick={handleBranchSend}
+                    disabled={!connected || !branchInputValue.trim()}
+                    aria-label="发送分支消息"
+                  >
+                    <SendOutlined />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Dice Overlay */}
       {diceOverlay && (
         <div className="dice-overlay show" onClick={() => setDiceOverlay(null)}>
           <div className="dice-overlay-content" onClick={e => e.stopPropagation()}>
@@ -795,22 +879,6 @@ export function ChatRoom() {
           placeholder="存档名称"
           value={saveName}
           onChange={(e) => setSaveName(e.target.value)}
-        />
-      </Modal>
-
-      {/* Branch Modal */}
-      <Modal
-        title="创建对话分支"
-        open={branchModalVisible}
-        onOk={handleCreateBranch}
-        onCancel={() => setBranchModalVisible(false)}
-        okText="创建分支"
-        cancelText="取消"
-      >
-        <Input
-          placeholder="分支名称（如：探索洞穴）"
-          value={branchName}
-          onChange={(e) => setBranchName(e.target.value)}
         />
       </Modal>
     </div>

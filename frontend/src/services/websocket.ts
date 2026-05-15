@@ -1,5 +1,5 @@
 export interface ChatMessage {
-  type: 'player_message' | 'kp_response' | 'kp_thinking' | 'kp_thinking_chunk' | 'dice_result' | 'system' | 'error' | 'save_loaded' | 'save_created' | 'history_clear' | 'character_update' | 'branch_list' | 'branch_created' | 'branch_switched';
+  type: 'player_message' | 'kp_response' | 'kp_thinking' | 'kp_thinking_chunk' | 'dice_result' | 'system' | 'error' | 'save_loaded' | 'save_created' | 'history_clear' | 'character_update' | 'branch_created' | 'branch_kp_response' | 'branch_player_message' | 'branch_system';
   role: string;
   content: string;
   username?: string;
@@ -20,7 +20,7 @@ export interface ChatMessage {
   selected_character?: Record<string, unknown>;
   character_stats?: Record<string, number>;
   save?: Record<string, unknown>;
-  branches?: Array<{id: number; name: string; is_active: boolean; created_at: string}>;
+  suggestions?: string[];
 }
 
 type MessageHandler = (message: ChatMessage) => void;
@@ -106,12 +106,8 @@ class WebSocketService {
     this.send({ type: 'branch_create', content: name });
   }
 
-  switchBranch(branchId: number | null) {
-    this.send({ type: 'branch_switch', branch_id: branchId });
-  }
-
-  listBranches() {
-    this.send({ type: 'branch_list' });
+  sendBranchMessage(content: string) {
+    this.send({ type: 'branch_message', content });
   }
 
   onMessage(handler: MessageHandler) {

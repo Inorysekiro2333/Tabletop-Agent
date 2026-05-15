@@ -154,8 +154,45 @@ class ChatSession:
 请作为 TRPG 的 KP/主持人，引导玩家进行冒险。
 保持剧情连贯性，适当设置悬念和挑战。
 当玩家请求投骰时，请使用 /roll 命令。
+
+【回复格式要求 - 必须严格遵守】
+你的每次回复必须使用以下标记来组织内容，让玩家能清晰分辨不同类型的信息：
+
+[DESC]环境描写、场景氛围、叙事性描述[/DESC]
+[ACTION]玩家角色的行动结果、你做了什么、检定结果[/ACTION]
+[NPC]NPC的行动、对话、反应[/NPC]
+[EVENT]环境变化、突发事件、新线索出现[/EVENT]
+[STATUS]角色状态变化提醒（HP增减、属性变化、获得物品等）[/STATUS]
+
+格式规则：
+1. 每个段落必须用对应的标记包裹
+2. 可以省略不需要的标记（如本轮没有NPC动作就不写[NPC]）
+3. 标记必须是英文大写，成对出现（开始和结束）
+4. 多个同类内容可以放在同一个标记块内
+5. 示例回复格式：
+[DESC]幽暗的走廊尽头传来低沉的呼吸声，墙上的火把摇曳不定...[/DESC]
+[ACTION]你小心翼翼地推开房门，敏捷检定成功(DC 15, 掷出18)。房间里堆满了古老的书籍。[/ACTION]
+[STATUS]你的理智值因目睹不可名状之物而动摇。[/STATUS]
+
+【行动建议】
+在回复的最末尾，根据当前剧情给出3-4个具体、贴合场景的行动建议，格式为：
+[SUGGESTIONS: 建议1 | 建议2 | 建议3]
+建议要具体且有针对性，不要泛泛而谈。例如：
+[SUGGESTIONS: 调查书桌上的笔记 | 与酒馆老板打听消息 | 悄悄尾随可疑的商人]
 """
         return base_prompt + char_info_text + stats_text + player_info if base_prompt else char_info_text + stats_text + player_info
+
+    @staticmethod
+    def parse_suggestions(text: str) -> tuple[str, list[str]]:
+        """从 AI 响应中提取行动建议，返回 (清理后文本, 建议列表)"""
+        pattern = r'\[SUGGESTIONS:\s*([^\]]+)\]'
+        suggestions: list[str] = []
+        match = re.search(pattern, text)
+        if match:
+            raw = match.group(1).strip()
+            suggestions = [s.strip() for s in raw.split('|') if s.strip()]
+        cleaned = re.sub(pattern, '', text).strip()
+        return cleaned, suggestions
 
     @staticmethod
     def parse_character_updates(text: str) -> tuple[str, Dict[str, int]]:

@@ -31,6 +31,12 @@ class CharacterCreate(BaseModel):
     equipment: Optional[List[str]] = []
     backstory: Optional[str] = None
     personality: Optional[PersonalitySchema] = None
+    relationships: Optional[List[dict]] = []
+    faction: Optional[str] = None
+    goals: Optional[List[dict]] = []
+    ideals: Optional[List[str]] = []
+    flaws: Optional[List[str]] = []
+    personal_traits: Optional[List[str]] = []
 
 
 class CharacterUpdate(BaseModel):
@@ -45,6 +51,12 @@ class CharacterUpdate(BaseModel):
     equipment: Optional[List[str]] = None
     backstory: Optional[str] = None
     personality: Optional[PersonalitySchema] = None
+    relationships: Optional[List[dict]] = None
+    faction: Optional[str] = None
+    goals: Optional[List[dict]] = None
+    ideals: Optional[List[str]] = None
+    flaws: Optional[List[str]] = None
+    personal_traits: Optional[List[str]] = None
 
 
 class CharacterResponse(BaseModel):
@@ -61,6 +73,12 @@ class CharacterResponse(BaseModel):
     equipment: Optional[List[str]] = []
     backstory: Optional[str]
     personality: Dict[str, str]
+    relationships: Optional[List[dict]] = []
+    faction: Optional[str] = None
+    goals: Optional[List[dict]] = []
+    ideals: Optional[List[str]] = []
+    flaws: Optional[List[str]] = []
+    personal_traits: Optional[List[str]] = []
     created_at: datetime
     updated_at: datetime
 

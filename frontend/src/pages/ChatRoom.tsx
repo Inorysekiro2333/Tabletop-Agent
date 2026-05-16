@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Button, Input, List, Empty, Modal, Select, message } from 'antd';
+import { Button, Input, List, Empty, Modal, message } from 'antd';
 import type { InputRef } from 'antd';
 import {
   SendOutlined,
@@ -22,42 +22,15 @@ import './ChatRoom.css';
 
 const QUICK_DICE = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'];
 
-/** Parse formatted AI response into styled segments */
-interface FormattedSegment {
-  type: 'desc' | 'action' | 'npc' | 'event' | 'status' | 'text';
-  content: string;
-}
-
-function parseFormattedContent(content: string): FormattedSegment[] {
-  const segments: FormattedSegment[] = [];
-  const markerRegex = /\[(DESC|ACTION|NPC|EVENT|STATUS)\]([\s\S]*?)\[\/\1\]/g;
-  let lastIndex = 0;
-
-  const matches: Array<{ index: number; length: number; type: string; content: string }> = [];
-  let match;
-  while ((match = markerRegex.exec(content)) !== null) {
-    matches.push({ index: match.index, length: match[0].length, type: match[1].toLowerCase(), content: match[2].trim() });
-  }
-
-  if (matches.length === 0) {
-    return [{ type: 'text', content }];
-  }
-
-  for (const m of matches) {
-    if (m.index > lastIndex) {
-      const before = content.slice(lastIndex, m.index).trim();
-      if (before) segments.push({ type: 'text', content: before });
-    }
-    segments.push({ type: m.type as FormattedSegment['type'], content: m.content });
-    lastIndex = m.index + m.length;
-  }
-
-  if (lastIndex < content.length) {
-    const after = content.slice(lastIndex).trim();
-    if (after) segments.push({ type: 'text', content: after });
-  }
-
-  return segments;
+/** Render AI response with **bold** inline emphasis */
+function renderFormattedText(content: string): string {
+  // Strip legacy [TAG]...[/TAG] blocks (treat content as plain text)
+  let text = content
+    .replace(/\[\/?(?:DESC|ACTION|NPC|EVENT|STATUS)\]/g, '')
+    .replace(/\[AQU\w*(?:行动|描述|事件|状态)[：:\s]*\]/gi, '');
+  // Convert **bold** to <strong>
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  return text;
 }
 
 export function ChatRoom() {
@@ -125,9 +98,7 @@ export function ChatRoom() {
     try {
       const res = await characterAPI.list();
       setCharacters(res.data);
-      if (res.data.length > 0) {
-        setSelectedCharacter(res.data[0]);
-      }
+      // 角色初始选择由下面的 useEffect 统一处理（等 campaign 和 characters 都就绪后）
     } catch {
       message.error('加载角色卡失败');
     }
@@ -326,6 +297,23 @@ export function ChatRoom() {
     };
   }, [campaignId, token, connectWebSocket, navigate]);
 
+  // 初始角色选择：campaign 和 characters 都加载完成后，使用 campaign 绑定的角色
+  const initialCharSelectDone = useRef(false);
+  useEffect(() => {
+    if (initialCharSelectDone.current || !campaign || characters.length === 0 || !connected) return;
+
+    // 每场战役固定使用创建时选择的角色，不允许切换
+    const preferredId = campaign.character_id;
+    const char = preferredId
+      ? characters.find(c => c.id === preferredId)
+      : null;
+    if (!char) return;
+
+    setSelectedCharacter(char);
+    wsService.selectCharacter(char.id);
+    initialCharSelectDone.current = true;
+  }, [campaign, characters, connected]);
+
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
@@ -348,6 +336,7 @@ export function ChatRoom() {
 
   const handleSuggestionClick = (suggestion: string) => {
     setInputValue(suggestion);
+    setUsedSuggestions(prev => new Set([...prev, suggestion]));
     inputRef.current?.focus();
   };
 
@@ -391,7 +380,11 @@ export function ChatRoom() {
   // ── 分支操作 ──
   const handleForkFromMessage = (msgIndex: number) => {
     if (!connected) return;
-    wsService.createBranch(`分支 ${new Date().toLocaleTimeString()}`);
+    const contextMsgs = messages.slice(0, msgIndex + 1).map(m => ({
+      role: m.role,
+      content: m.content,
+    }));
+    wsService.createBranch(`分支 ${new Date().toLocaleTimeString()}`, contextMsgs);
   };
 
   const handleBranchSend = () => {
@@ -447,23 +440,14 @@ export function ChatRoom() {
     return [];
   }, [messages]);
 
+  // 只要还有未使用的建议就显示，不要求最后一条消息必须是 KP（系统消息不应冲掉建议）
   const showSuggestions = !isKPThinking && suggestionChips.length > 0 && messages.length > 0
-    && messages[messages.length - 1]?.role === 'kp';
+    && !suggestionChips.every(s => usedSuggestions.has(s));
 
   const renderFormattedContent = (content: string, isStreaming: boolean) => {
-    const segments = parseFormattedContent(content);
     return (
       <>
-        {segments.map((seg, i) => {
-          if (seg.type === 'text') {
-            return <span key={i} dangerouslySetInnerHTML={{ __html: seg.content }} />;
-          }
-          return (
-            <span key={i} className={`fm-seg fm-${seg.type}`}>
-              <span className="fm-seg-content" dangerouslySetInnerHTML={{ __html: seg.content }} />
-            </span>
-          );
-        })}
+        <span dangerouslySetInnerHTML={{ __html: renderFormattedText(content) }} />
         {isStreaming && <span className="streaming-cursor" />}
       </>
     );
@@ -643,6 +627,84 @@ export function ChatRoom() {
                   <div className="inventory-empty">空背包</div>
                 )}
               </div>
+
+              {selectedCharacter.faction && (
+                <div className="char-section">
+                  <div className="char-section-title">阵营</div>
+                  <span className="trait-tag faction-tag">{selectedCharacter.faction}</span>
+                </div>
+              )}
+
+              {selectedCharacter.personal_traits && selectedCharacter.personal_traits.length > 0 && (
+                <div className="char-section">
+                  <div className="char-section-title">个人特质</div>
+                  <div>
+                    {selectedCharacter.personal_traits.map((t, i) => (
+                      <span key={i} className="trait-tag">{t}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {selectedCharacter.ideals && selectedCharacter.ideals.length > 0 && (
+                <div className="char-section">
+                  <div className="char-section-title">理想/信念</div>
+                  <div>
+                    {selectedCharacter.ideals.map((t, i) => (
+                      <span key={i} className="trait-tag">{t}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {selectedCharacter.flaws && selectedCharacter.flaws.length > 0 && (
+                <div className="char-section">
+                  <div className="char-section-title">性格缺陷</div>
+                  <div>
+                    {selectedCharacter.flaws.map((t, i) => (
+                      <span key={i} className="trait-tag flaw-tag">{t}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {selectedCharacter.goals && selectedCharacter.goals.length > 0 && (
+                <div className="char-section">
+                  <div className="char-section-title">当前目标</div>
+                  {selectedCharacter.goals.map((g, i) => (
+                    <div key={i} className="goal-item">
+                      <span className="goal-name">{g.name || g}</span>
+                      {typeof g === 'object' && g.status && (
+                        <span className={`goal-status status-${g.status}`}>{g.status}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {selectedCharacter.relationships && selectedCharacter.relationships.length > 0 && (
+                <div className="char-section">
+                  <div className="char-section-title">人际关系</div>
+                  {selectedCharacter.relationships.map((r, i) => (
+                    <div key={i} className="relation-item">
+                      <span className="relation-name">{r.name || r}</span>
+                      {typeof r === 'object' && r.type && (
+                        <span className="relation-type">{r.type}</span>
+                      )}
+                      {typeof r === 'object' && r.attitude && (
+                        <span className="relation-attitude">{r.attitude}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {selectedCharacter.backstory && (
+                <div className="char-section">
+                  <div className="char-section-title">背景故事</div>
+                  <p className="backstory-text">{selectedCharacter.backstory}</p>
+                </div>
+              )}
             </>
           ) : (
             <Empty description="暂无角色" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -671,21 +733,37 @@ export function ChatRoom() {
           <List
             size="small"
             dataSource={saves}
-            renderItem={(save) => (
-              <List.Item
-                className="save-item"
-                onClick={() => handleLoadSave(save)}
-              >
-                <List.Item.Meta
-                  title={save.name}
-                  description={
-                    <div className="save-time">
-                      {new Date(save.created_at).toLocaleDateString()}
-                    </div>
-                  }
-                />
-              </List.Item>
-            )}
+            renderItem={(save) => {
+              const snap = (save as any).snapshot || {};
+              const scene = snap.current_scene || '';
+              const charName = snap.character_name || '';
+              const quests = snap.quests || [];
+              const combatActive = snap.combat_state?.is_active;
+              const activeQuests = quests.filter((q: any) => q.status !== '完成');
+              return (
+                <List.Item
+                  className="save-item"
+                  onClick={() => handleLoadSave(save)}
+                >
+                  <List.Item.Meta
+                    title={save.name}
+                    description={
+                      <div className="save-preview">
+                        {charName && <span className="save-char">👤 {charName}</span>}
+                        {scene && <span className="save-scene">📍 {scene.slice(0, 20)}</span>}
+                        {combatActive && <span className="save-combat">⚔️ 战斗中</span>}
+                        {activeQuests.length > 0 && (
+                          <span className="save-quests">📋 {activeQuests.length}个任务</span>
+                        )}
+                        <span className="save-time">
+                          {new Date(save.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                    }
+                  />
+                </List.Item>
+              );
+            }}
             locale={{ emptyText: '暂无存档' }}
           />
         </div>
@@ -701,25 +779,6 @@ export function ChatRoom() {
             {campaign?.title || '加载中...'}
           </div>
           <div className="chat-header-actions">
-            <Select
-              value={selectedCharacter?.id}
-              onChange={(id) => {
-                const char = characters.find((c) => c.id === id) || null;
-                setSelectedCharacter(char);
-                if (id) {
-                  wsService.selectCharacter(id);
-                }
-              }}
-              placeholder="选择角色"
-              style={{ width: 130 }}
-              size="small"
-            >
-              {characters.map((char) => (
-                <Select.Option key={char.id} value={char.id}>
-                  {char.name}
-                </Select.Option>
-              ))}
-            </Select>
             <button
               className="theme-toggle-btn"
               onClick={toggleTheme}

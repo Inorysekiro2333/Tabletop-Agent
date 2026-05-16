@@ -20,6 +20,12 @@ class Character(Base):
     equipment = Column(JSON, default=list)  # 装备/背包物品列表
     backstory = Column(Text, nullable=True)
     personality = Column(JSON, default=dict)  # trait, ideal, bond, flaw
+    relationships = Column(JSON, default=list)  # [{name, type, description, attitude}]
+    faction = Column(String(100), nullable=True)  # 阵营/派系
+    goals = Column(JSON, default=list)  # [{name, description, status}]
+    ideals = Column(JSON, default=list)  # 理想/信念
+    flaws = Column(JSON, default=list)  # 性格缺陷
+    personal_traits = Column(JSON, default=list)  # 个人特质
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

@@ -33,6 +33,12 @@ def character_to_response(char: Character) -> CharacterResponse:
         equipment=char.equipment or [],
         backstory=char.backstory,
         personality=char.personality or {},
+        relationships=char.relationships or [],
+        faction=char.faction,
+        goals=char.goals or [],
+        ideals=char.ideals or [],
+        flaws=char.flaws or [],
+        personal_traits=char.personal_traits or [],
         created_at=char.created_at,
         updated_at=char.updated_at
     )
@@ -70,7 +76,13 @@ async def create_character(
         skills=character_data.skills,
         equipment=character_data.equipment,
         backstory=character_data.backstory,
-        personality=personality_dict
+        personality=personality_dict,
+        relationships=character_data.relationships or [],
+        faction=character_data.faction,
+        goals=character_data.goals or [],
+        ideals=character_data.ideals or [],
+        flaws=character_data.flaws or [],
+        personal_traits=character_data.personal_traits or [],
     )
     db.add(character)
     db.commit()

@@ -7,6 +7,7 @@ import { campaignAPI, characterAPI, aiConfigAPI } from '../services/api';
 import type { Campaign, Character, AIConfig } from '../services/api';
 import { useTheme } from '../hooks/useTheme';
 import { PRESETS, type CampaignPreset } from '../data/presets';
+import { CharacterModal } from '../components/CharacterModal';
 import './Dashboard.css';
 
 type ViewKey = 'overview' | 'campaigns' | 'characters' | 'ai-configs';
@@ -29,12 +30,12 @@ export function Dashboard() {
   const [aiConfigs, setAiConfigs] = useState<AIConfig[]>([]);
   const [campaignModalVisible, setCampaignModalVisible] = useState(false);
   const [characterModalVisible, setCharacterModalVisible] = useState(false);
+  const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
   const [aiConfigModalVisible, setAiConfigModalVisible] = useState(false);
   const [editingConfigId, setEditingConfigId] = useState<number | null>(null);
   const [selectedPreset, setSelectedPreset] = useState<CampaignPreset | null>(null);
   const [presetStep, setPresetStep] = useState<'select' | 'configure'>('select');
   const [form] = Form.useForm();
-  const [characterForm] = Form.useForm();
   const [aiConfigForm] = Form.useForm();
 
   const loadData = useCallback(async () => {
@@ -56,7 +57,7 @@ export function Dashboard() {
     loadData();
   }, [loadData]);
 
-  const handleCreateCampaign = async (values: { title: string; description?: string; ai_config_id?: number }) => {
+  const handleCreateCampaign = async (values: { title: string; description?: string; ai_config_id?: number; character_id?: number }) => {
     try {
       const payload = {
         ...values,
@@ -71,15 +72,27 @@ export function Dashboard() {
     }
   };
 
-  const handleCreateCharacter = async (values: Partial<Character>) => {
+  const handleCharacterSuccess = () => {
+    loadData();
+  };
+
+  const handleOpenCreateCharacter = () => {
+    setEditingCharacter(null);
+    setCharacterModalVisible(true);
+  };
+
+  const handleEditCharacter = (character: Character) => {
+    setEditingCharacter(character);
+    setCharacterModalVisible(true);
+  };
+
+  const handleDeleteCharacter = async (id: number) => {
     try {
-      const character = await characterAPI.create(values);
-      setCharacters(prev => [...prev, character.data]);
-      setCharacterModalVisible(false);
-      characterForm.resetFields();
-      message.success('角色卡创建成功');
+      await characterAPI.delete(id);
+      setCharacters(prev => prev.filter(c => c.id !== id));
+      message.success('角色已删除');
     } catch {
-      message.error('创建失败');
+      message.error('删除失败');
     }
   };
 
@@ -229,7 +242,7 @@ export function Dashboard() {
             <Button type="primary" onClick={openCampaignModal}>
               创建战役
             </Button>
-            <Button onClick={() => { setActiveView('characters'); setCharacterModalVisible(true); }}>
+            <Button onClick={() => { setActiveView('characters'); handleOpenCreateCharacter(); }}>
               创建角色卡
             </Button>
             <Button onClick={() => { setActiveView('ai-configs'); setAiConfigModalVisible(true); }}>
@@ -349,16 +362,41 @@ export function Dashboard() {
       <div className="eyebrow">角色管理</div>
       <h1>角色卡</h1>
       <div className="card-grid">
-        <div className="add-card" onClick={() => setCharacterModalVisible(true)}>
+        <div className="add-card" onClick={handleOpenCreateCharacter}>
           <div className="add-icon">+</div>
           <span>创建角色卡</span>
         </div>
         {characters.map(character => (
-          <Card key={character.id} title={character.name}>
-            <p>种族: {character.race || '未知'}</p>
-            <p>职业: {character.character_class || '未知'}</p>
-            <p>等级: {character.level}</p>
-            <p>生命: {character.hp} | 护甲: {character.ac}</p>
+          <Card
+            key={character.id}
+            title={character.name}
+            extra={
+              <div style={{ display: 'flex', gap: 4 }}>
+                <Button size="small" onClick={() => handleEditCharacter(character)}>编辑</Button>
+                <Popconfirm
+                  title="确定删除此角色？"
+                  description="删除后无法恢复，关联的战役将失去角色绑定"
+                  onConfirm={() => handleDeleteCharacter(character.id)}
+                  okText="删除"
+                  cancelText="取消"
+                >
+                  <Button size="small" danger>删除</Button>
+                </Popconfirm>
+              </div>
+            }
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: 13 }}>
+              <div><span style={{ color: 'var(--color-text-muted)' }}>种族</span> {character.race || '未知'}</div>
+              <div><span style={{ color: 'var(--color-text-muted)' }}>职业</span> {character.character_class || '未知'}</div>
+              <div><span style={{ color: 'var(--color-text-muted)' }}>等级</span> Lv.{character.level}</div>
+              <div><span style={{ color: 'var(--color-text-muted)' }}>HP</span> {character.hp} / AC {character.ac}</div>
+              {character.faction && <div style={{ gridColumn: '1 / -1' }}><span style={{ color: 'var(--color-text-muted)' }}>阵营</span> {character.faction}</div>}
+            </div>
+            {character.backstory && (
+              <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', margin: '8px 0 0', lineHeight: 1.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {character.backstory}
+              </p>
+            )}
           </Card>
         ))}
       </div>
@@ -517,6 +555,15 @@ export function Dashboard() {
               <Form.Item name="description" label="描述">
                 <Input.TextArea placeholder="描述你的战役..." rows={2} />
               </Form.Item>
+              <Form.Item name="character_id" label="游玩角色">
+                <Select placeholder="选择游玩角色" allowClear>
+                  {characters.map(char => (
+                    <Select.Option key={char.id} value={char.id}>
+                      {char.name} — {char.character_class || '未知职业'} Lv.{char.level}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
               <Form.Item name="ai_config_id" label="AI 配置">
                 <Select placeholder="选择 AI 配置" allowClear>
                   {aiConfigs.map(config => (
@@ -535,44 +582,12 @@ export function Dashboard() {
       </Modal>
 
       {/* Character Modal */}
-      <Modal
-        title="创建角色卡"
-        open={characterModalVisible}
-        onCancel={() => setCharacterModalVisible(false)}
-        footer={null}
-      >
-        <Form form={characterForm} onFinish={handleCreateCharacter} layout="vertical">
-          <Form.Item name="name" label="角色名" rules={[{ required: true }]}>
-            <Input placeholder="例如：Gandalf" />
-          </Form.Item>
-          <Form.Item name="race" label="种族">
-            <Select placeholder="选择种族" allowClear>
-              <Select.Option value="人类">人类</Select.Option>
-              <Select.Option value="精灵">精灵</Select.Option>
-              <Select.Option value="矮人">矮人</Select.Option>
-              <Select.Option value="半身人">半身人</Select.Option>
-              <Select.Option value="兽人">兽人</Select.Option>
-              <Select.Option value="龙裔">龙裔</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item name="character_class" label="职业">
-            <Select placeholder="选择职业" allowClear>
-              <Select.Option value="战士">战士</Select.Option>
-              <Select.Option value="法师">法师</Select.Option>
-              <Select.Option value="盗贼">盗贼</Select.Option>
-              <Select.Option value="牧师">牧师</Select.Option>
-              <Select.Option value="游侠">游侠</Select.Option>
-              <Select.Option value="吟游诗人">吟游诗人</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item name="level" label="等级" initialValue={1}>
-            <Input type="number" min={1} max={20} />
-          </Form.Item>
-          <Button type="primary" htmlType="submit" block>
-            创建
-          </Button>
-        </Form>
-      </Modal>
+      <CharacterModal
+        visible={characterModalVisible}
+        character={editingCharacter}
+        onClose={() => { setCharacterModalVisible(false); setEditingCharacter(null); }}
+        onSuccess={handleCharacterSuccess}
+      />
 
       {/* AI Config Modal */}
       <Modal

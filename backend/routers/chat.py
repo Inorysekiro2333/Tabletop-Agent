@@ -22,7 +22,8 @@ from models.chat_branch import ChatBranch
 from utils.security import get_current_user, verify_token
 from services.ai_gateway import AIGateway
 from services.chat_session import ChatSessionManager, ChatSession
-from services.dice import parse_dice_command, format_dice_result
+from services.dice import parse_dice_command, format_dice_result, parse_action_command
+from services.dice import resolve_attack, resolve_skill_check, resolve_saving_throw, get_ability_modifier
 
 router = APIRouter(tags=["Chat"])
 
@@ -222,8 +223,12 @@ async def websocket_chat(websocket: WebSocket, campaign_id: int, token: str = No
         campaign.last_played_at = datetime.utcnow()
         db.commit()
 
-        # 获取或创建会话
+        # 获取或创建会话，尝试从 Redis 恢复
         session = ChatSessionManager.get_or_create_session(campaign_id)
+        redis_session = await ChatSessionManager.restore_from_redis(campaign_id)
+        if redis_session and redis_session.story_generated:
+            session = redis_session
+            logger.info(f"从 Redis 恢复了会话: campaign_id={campaign_id}")
 
         # 设置系统提示词
         if campaign.system_prompt:
@@ -239,10 +244,17 @@ async def websocket_chat(websocket: WebSocket, campaign_id: int, token: str = No
             if ai_config:
                 session.ai_config_id = ai_config.id
 
-        # 加载用户角色数据到会话（用于状态追踪）
-        character = db.query(Character).filter(
-            Character.user_id == user.id
-        ).first()
+        # 加载战役绑定的角色数据到会话（状态追踪 + AI 上下文注入）
+        character = None
+        if campaign.character_id:
+            character = db.query(Character).filter(
+                Character.id == campaign.character_id,
+                Character.user_id == user.id
+            ).first()
+        if not character:
+            character = db.query(Character).filter(
+                Character.user_id == user.id
+            ).first()
         if character:
             session.set_character_stats(
                 character_name=character.name,
@@ -266,6 +278,12 @@ async def websocket_chat(websocket: WebSocket, campaign_id: int, token: str = No
                 "hp": character.hp or 10,
                 "ac": character.ac or 10,
                 "equipment": character.equipment or [],
+                "relationships": character.relationships or [],
+                "faction": character.faction or "",
+                "goals": character.goals or [],
+                "ideals": character.ideals or [],
+                "flaws": character.flaws or [],
+                "personal_traits": character.personal_traits or [],
             }
             session.set_selected_character(char_data)
 
@@ -327,8 +345,10 @@ async def websocket_chat(websocket: WebSocket, campaign_id: int, token: str = No
                 await handle_branch_message(websocket, campaign_id, user, content, session)
 
     except WebSocketDisconnect:
+        await ChatSessionManager.save_to_redis(campaign_id)
         manager.disconnect(websocket, campaign_id)
     except Exception as e:
+        await ChatSessionManager.save_to_redis(campaign_id)
         await websocket.send_json({
             "type": "error",
             "content": f"Error: {str(e)}"
@@ -368,6 +388,12 @@ async def handle_select_character(
                 "hp": character.hp or 10,
                 "ac": character.ac or 10,
                 "equipment": character.equipment or [],
+                "relationships": character.relationships or [],
+                "faction": character.faction or "",
+                "goals": character.goals or [],
+                "ideals": character.ideals or [],
+                "flaws": character.flaws or [],
+                "personal_traits": character.personal_traits or [],
             }
             session.set_selected_character(char_data)
             await websocket.send_json({
@@ -385,17 +411,40 @@ async def handle_save_game(
     message_data: dict,
     session: ChatSession
 ):
-    """处理存档 —— P0-2: 保存完整游戏快照"""
+    """处理存档 —— 保存完整游戏快照，生成丰富摘要"""
     save_name = message_data.get("content", f"存档 {datetime.utcnow().strftime('%m-%d %H:%M')}")
 
     from database import SessionLocal
     db = SessionLocal()
     try:
         snapshot = session.get_game_snapshot()
+
+        # 生成丰富的存档摘要
+        desc_parts = [f"第 {snapshot.get('session_number', 1)} 章"]
+        scene = snapshot.get("current_scene", "")
+        if scene:
+            desc_parts.append(f"场景: {scene[:30]}")
+        char_name = snapshot.get("character_name", "")
+        if char_name:
+            desc_parts.append(f"角色: {char_name}")
+        quests = snapshot.get("quests", [])
+        if quests:
+            active_quests = [q.get("name", str(q)) for q in quests if isinstance(q, dict) and q.get("status") != "完成"]
+            if active_quests:
+                desc_parts.append(f"任务: {', '.join(active_quests[:2])}")
+        combat = snapshot.get("combat_state", {})
+        if combat and combat.get("is_active"):
+            desc_parts.append(f"战斗中 (第{combat.get('round', 1)}轮)")
+        npcs = snapshot.get("npcs", [])
+        if npcs:
+            desc_parts.append(f"NPC: {len(npcs)}人")
+        desc_parts.append(f"{snapshot.get('messages_count', 0)}条消息")
+        description = " | ".join(desc_parts)
+
         save = Save(
             campaign_id=campaign_id,
             name=save_name,
-            description=f"第 {snapshot.get('session_number', 1)} 章，{snapshot.get('messages_count', 0)} 条消息",
+            description=description,
             snapshot=snapshot
         )
         db.add(save)
@@ -429,28 +478,34 @@ async def handle_branch_create(
     message_data: dict,
     session: ChatSession
 ):
-    """创建对话分支 —— 新的侧边栏设计"""
+    """创建对话分支 —— 压缩当前上下文为 JSON 快照存入 DB，供分支 AI 引用"""
     branch_name = message_data.get("content", f"分支 {datetime.utcnow().strftime('%H:%M')}")
+    frontend_messages = message_data.get("messages", [])  # 前端传来的当前对话
 
     from database import SessionLocal
     db = SessionLocal()
     try:
+        fork_index = len(session.messages) - 1
+        # 生成完整上下文快照（传入前端消息以弥补预设开场白不在后端 session 的问题）
+        context_snapshot = session.build_context_snapshot(fork_index, frontend_messages)
+
         branch = ChatBranch(
             campaign_id=campaign_id,
-            parent_message_id=len(session.messages),  # Fork point by message count
+            parent_message_id=len(session.messages),
             name=branch_name,
-            is_active=True
+            is_active=True,
+            context_snapshot=context_snapshot,
         )
         db.add(branch)
         db.commit()
         db.refresh(branch)
 
         # Store branch info in session for context isolation
-        session.create_branch(branch.id, len(session.messages) - 1)
+        session.create_branch(branch.id, fork_index)
 
         await websocket.send_json({
             "type": "branch_created",
-            "content": f"分支对话已创建，在右侧面板中与 AI 闲聊，不会影响主线剧情",
+            "content": "分支对话已创建，上下文快照已保存",
             "branch": {"id": branch.id, "name": branch.name}
         })
 
@@ -486,49 +541,149 @@ async def handle_branch_message(
         if not ai_config:
             return
 
-        # 分支人设：像朋友闲聊，区别于主线 KP 的严肃风格
-        char_name = session.game_state.character_name or "玩家"
-        char_stats = session.game_state.character_stats
+        # ── 加载分支上下文快照（存于 DB 的 JSON，创建分支时生成） ──
+        branch_id = session.current_branch_id
+        snapshot = None
+        if branch_id:
+            branch_record = db.query(ChatBranch).filter(ChatBranch.id == branch_id).first()
+            if branch_record and branch_record.context_snapshot:
+                snapshot = branch_record.context_snapshot
+
+        # 从快照构建上下文；无快照时回退到当前 session 状态
+        ctx_world_setting = ""
+        if snapshot:
+            ctx_char = snapshot.get("character", {})
+            ctx_world = snapshot.get("world", {})
+            ctx_exchanges = snapshot.get("recent_exchanges", [])
+            ctx_world_setting = snapshot.get("world_setting", "")
+            char_name = ctx_char.get("name", "玩家")
+            char_stats = ctx_char.get("attributes", {})
+            char_stats["hp"] = ctx_char.get("hp", 10)
+            char_stats["ac"] = ctx_char.get("ac", 10)
+            char_stats["level"] = ctx_char.get("level", 1)
+        else:
+            ctx_char = session.game_state.selected_character or {}
+            ctx_world = {
+                "current_scene": session.game_state.current_scene or "",
+                "npcs": session.game_state.npcs or [],
+                "quests": session.game_state.quests or [],
+                "locations": session.game_state.locations or [],
+            }
+            ctx_exchanges = []
+            char_name = session.game_state.character_name or "玩家"
+            char_stats = session.game_state.character_stats
+
         stats_summary = f"HP:{char_stats.get('hp','?')} AC:{char_stats.get('ac','?')} LV:{char_stats.get('level','?')}" if char_stats else ""
 
-        branch_system_prompt = f"""你现在不是KP，你是 {char_name} 的冒险伙伴，正在和 {char_name} 私下闲聊。你知道主线故事的所有进展，但你可以自由地讨论、吐槽、出主意。
+        # ── 从快照提取角色信息 ──
+        equipment = ctx_char.get("equipment", []) or []
+        eq_text = "、".join(equipment) if equipment else "无"
+        skills_text = "、".join(ctx_char.get("skills", []) or []) if ctx_char.get("skills") else "无"
+        backstory = ctx_char.get("backstory", "") or ""
+        personality = ctx_char.get("personality", {}) or {}
+        personality_text = "；".join([f"{k}: {v}" for k, v in personality.items()]) if personality else "无"
+        faction = ctx_char.get("faction", "") or ""
+        goals_list = ctx_char.get("goals", []) or []
+        goals_text = "；".join([g.get("name", str(g)) if isinstance(g, dict) else str(g) for g in goals_list[:3]]) if goals_list else "无"
+        relationships = ctx_char.get("relationships", []) or []
+        rel_text = "；".join([f"{r.get('name','?')}({r.get('type','?')})" if isinstance(r, dict) else str(r) for r in relationships[:5]]) if relationships else "无"
+        personal_traits = ctx_char.get("personal_traits", []) or []
+        ideals = ctx_char.get("ideals", []) or []
+        flaws = ctx_char.get("flaws", []) or []
 
-【你的说话方式 — 必须严格遵守】
-- 用"我"来称呼自己，就像朋友聊天一样
-- 口语化、接地气，不要任何正式的书面语
-- 可以给出主观建议（"我觉得..."、"我建议你..."）
-- 可以吐槽NPC（"那个矮人老板好可疑"）
-- 可以分析局势（"你要是现在动手，可能会..."）
-- 可以反问对方（"要不然换个思路？"）
-- 说话像真人，每句不要太长，2-4句一个回合
+        # ── 从快照提取世界状态 ──
+        memory_parts = []
+        current_scene = ctx_world.get("current_scene", "")
+        if current_scene:
+            memory_parts.append(f"当前场景: {current_scene}")
 
-【参考聊天风格】
-玩家问：kp，这里我如果发动偷袭会怎么样？
-你回答：根据现在的情况，我其实不太建议你偷袭。首先这个npc是关键人物，偷袭成功的话你会丢失重要信息。其次你现在的属性({stats_summary})，会进行判定，如果判定失败会损失生命，并且失去这个npc的信任，得不偿失。要不然换个方向试试？
+        npcs = ctx_world.get("npcs", []) or []
+        if npcs:
+            npc_lines = ["已登场的NPC:"]
+            for npc in npcs[:5]:
+                name = npc.get("name", "?") if isinstance(npc, dict) else str(npc)
+                role = npc.get("role", "") if isinstance(npc, dict) else ""
+                attitude = npc.get("attitude", "") if isinstance(npc, dict) else ""
+                desc = npc.get("description", "") if isinstance(npc, dict) else ""
+                npc_lines.append(f"  - {name}" + (f" ({role})" if role else "") + (f" [{attitude}]" if attitude else "") + (f": {desc}" if desc else ""))
+            memory_parts.append("\n".join(npc_lines))
 
-【你的知识】
-- 你知道主线剧情的一切
-- 你知道 {char_name} 的角色数据和状态（{stats_summary}）
-- 你知道所有NPC的情况
-- 你可以结合这些信息给出有建设性的建议
-- 但你不直接操控游戏，只是给朋友出主意
+        quests = ctx_world.get("quests", []) or []
+        if quests:
+            quest_lines = ["当前任务:"]
+            for q in quests[:3]:
+                name = q.get("name", "?") if isinstance(q, dict) else str(q)
+                status = q.get("status", "") if isinstance(q, dict) else ""
+                quest_lines.append(f"  - {name}" + (f" [{status}]" if status else ""))
+            memory_parts.append("\n".join(quest_lines))
 
-记住：你不是严肃的主持人，你是一个熟知内情的朋友。用最自然的语气说话。不要长篇大论。"""
+        locations = ctx_world.get("locations", []) or []
+        if locations:
+            loc_lines = ["已知地点:"]
+            for loc in locations[:3]:
+                name = loc.get("name", "?") if isinstance(loc, dict) else str(loc)
+                loc_lines.append(f"  - {name}")
+            memory_parts.append("\n".join(loc_lines))
 
-        # 构建上下文
-        messages = [{"role": "system", "content": branch_system_prompt}]
-        # 注入主线记忆摘要（作为参考信息，不是对话历史）
-        main_history = session.get_messages_for_ai(max_history=30)
-        if main_history:
-            # 将历史转为系统参考信息，避免分支AI模仿主线KP的正式口吻
-            history_summary = "\n".join([
-                f"[{'玩家' if m['role'] == 'user' else '主线KP'}]: {m['content'][:200]}"
-                for m in main_history[-8:]
+        # ── 世界设定（从 system_prompt 提取的背景设定） ──
+        world_setting_text = ""
+        if snapshot and ctx_world_setting:
+            world_setting_text = f"【世界背景设定】\n{ctx_world_setting[:500]}"
+
+        memory_text = ""
+        if memory_parts:
+            memory_text = "【世界信息 — 来自分支创建时的快照】\n" + "\n\n".join(memory_parts)
+        if world_setting_text:
+            memory_text = world_setting_text + "\n\n" + memory_text if memory_text else world_setting_text
+
+        # ── 最近对话摘要（fork 点前的关键回合） ──
+        recent_text = ""
+        if ctx_exchanges:
+            recent_text = "【分支创建前的最近对话】\n" + "\n".join([
+                f"[{ex.get('role','?')}]: {ex.get('content','')[:200]}"
+                for ex in ctx_exchanges[-6:]
             ])
-            messages.append({
-                "role": "system",
-                "content": f"【主线剧情摘要 — 以下是你知道的剧情，但要按你的闲聊风格回复，不要模仿主线KP的口吻】\n{history_summary}"
-            })
+
+        # ── 系统提示 ──
+        branch_system_prompt = f"""你是 {char_name} 的冒险伙伴。你们正在一起冒险，现在私下聊几句。
+
+【说话方式】
+- 用"我"指自己，用"你"指 {char_name}，像朋友聊天一样
+- 口语化、接地气，不要书面语，不要长篇大论
+- 可以吐槽、出主意、分析局势、反问
+- 每回合2-4句话就够
+
+【{char_name} 的完整信息 — 来自上下文快照】
+姓名: {ctx_char.get('name', char_name)}
+种族/职业: {ctx_char.get('race', '未知')} {ctx_char.get('class', ctx_char.get('character_class', ''))} Lv.{ctx_char.get('level', 1)}
+状态: {stats_summary}
+背景: {backstory[:200] if backstory else '无'}
+性格: {personality_text}
+个人特质: {', '.join(personal_traits) if personal_traits else '无'}
+理想/信念: {', '.join(ideals) if ideals else '无'}
+性格缺陷: {', '.join(flaws) if flaws else '无'}
+阵营: {faction or '无'}
+背包物品: {eq_text}
+技能: {skills_text}
+人际关系: {rel_text}
+当前目标: {goals_text}
+
+{memory_text}
+
+{recent_text}
+
+【铁律 — 违反一条就会出戏】
+1. 绝不编造 NPC、物品、地点或事件。只能引用上面快照中列出的
+2. 玩家包里有什么就是什么，别凭空加东西
+3. 对话摘要里写的就是已经发生的，别篡改
+4. 不知道就说"我不清楚"，别瞎编
+5. 别用 [DESC] [ACTION] 这些KP标记，你不是KP
+6. 根据 {char_name} 的性格、特质和缺陷来回应，性格影响说话方式和态度
+
+你就是 {char_name} 身边最可靠的搭档。上述快照是唯一的事实依据。"""
+
+        # 构建 messages
+        messages = [{"role": "system", "content": branch_system_prompt}]
         messages.append({"role": "user", "content": content})
 
         thinking_id = str(uuid.uuid4())
@@ -586,7 +741,6 @@ async def handle_player_message(
         dice_str = content[5:] if content.startswith("/roll ") else content[3:]
         dice_result = parse_dice_command(dice_str)
         if dice_result:
-            # 广播投骰结果
             dice_msg = format_dice_result(dice_result, "玩家投骰")
             await manager.broadcast(campaign_id, {
                 "type": "dice_result",
@@ -598,9 +752,86 @@ async def handle_player_message(
                 "total": dice_result.total,
                 "success": dice_result.success
             })
-
-            # 记录消息
             session.add_message("player", content, dice_msg)
+            return
+
+    # 检查是否是动作/判定命令
+    action = parse_action_command(content)
+    if action:
+        char_data = session.game_state.selected_character or {}
+        action_type = action["action_type"]
+
+        if action_type == "attack":
+            # 构建防御者数据（从敌人列表找目标）
+            target_name = action.get("target", "敌人")
+            defender = {"name": target_name, "ac": 12, "hp": 20}
+            for enemy in session.game_state.enemies:
+                if enemy.get("name", "").lower() == target_name.lower():
+                    defender = enemy
+                    break
+
+            atk_bonus = get_ability_modifier(char_data, "STR")
+            result = resolve_attack(char_data, defender, atk_bonus,
+                                    action.get("damage_dice", "1d6"))
+
+            # 广播战斗结果
+            await manager.broadcast(campaign_id, {
+                "type": "dice_result",
+                "role": "system",
+                "content": result["description"],
+                "rolls": [result["attack_roll"]],
+                "total": result["attack_total"],
+                "success": result["success"],
+                "damage": result["damage"],
+                "is_crit": result.get("is_crit", False),
+                "is_fumble": result.get("is_fumble", False),
+            })
+
+            # 存储判定结果供 AI 叙事
+            session.game_state.last_judgment = result
+            session.add_message("player", content)
+            await get_ai_response(campaign_id, session)
+            return
+
+        elif action_type == "skill_check":
+            result = resolve_skill_check(char_data, action["skill"], action["dc"])
+            await manager.broadcast(campaign_id, {
+                "type": "dice_result",
+                "role": "system",
+                "content": result["description"],
+                "rolls": [result["roll"]],
+                "total": result["total"],
+                "success": result["success"],
+                "skill": action["skill"],
+                "dc": action["dc"],
+            })
+            session.game_state.last_judgment = result
+            session.add_message("player", content)
+            await get_ai_response(campaign_id, session)
+            return
+
+        elif action_type == "cast":
+            result = {
+                "action_type": "cast",
+                "spell": action["spell"],
+                "description": f"施放 {action['spell']}",
+                "success": True,
+            }
+            session.game_state.last_judgment = result
+            session.add_message("player", content)
+            await get_ai_response(campaign_id, session)
+            return
+
+        elif action_type == "use_item":
+            result = {
+                "action_type": "use_item",
+                "item": action["item"],
+                "description": f"使用 {action['item']}",
+                "success": True,
+            }
+            session.game_state.last_judgment = result
+            session.add_message("player", content)
+            await get_ai_response(campaign_id, session)
             return
 
     # 广播玩家消息
@@ -639,9 +870,18 @@ async def get_ai_response(campaign_id: int, session: ChatSession):
             })
             return
 
-        # 构建消息（限制历史消息数量避免请求过大）
-        messages = [{"role": "system", "content": session.get_full_system_prompt()}]
-        messages.extend(session.get_messages_for_ai(max_history=50))
+        # 构建消息：记忆摘要 + 系统提示 + 精简历史
+        messages = [{"role": "system", "content": session.get_memory_prompt()}]
+        messages.append({"role": "system", "content": session.get_full_system_prompt()})
+
+        # 注入当前判定结果（规则引擎输出）
+        if session.game_state.last_judgment:
+            j = session.game_state.last_judgment
+            judgment_text = f"【当前回合判定结果】{j.get('description', '')} — 请根据此结果生成环境描述和NPC反应。"
+            messages.append({"role": "system", "content": judgment_text})
+            session.game_state.last_judgment = None  # 消费后清除
+
+        messages.extend(session.get_messages_for_ai(max_history=20))
 
         thinking_id = str(uuid.uuid4())
 
@@ -762,6 +1002,29 @@ def _apply_character_updates(character, updates: Dict[str, int], session: ChatSe
         attributes=character.attributes or {},
     )
 
+    # 同步更新 selected_character 缓存，确保 AI 上下文与最新状态一致
+    updated_char_data = {
+        "id": character.id,
+        "name": character.name,
+        "race": character.race or "",
+        "character_class": character.character_class or "",
+        "level": character.level or 1,
+        "backstory": character.backstory or "",
+        "personality": character.personality or {},
+        "skills": character.skills or [],
+        "attributes": character.attributes or {},
+        "hp": character.hp or 10,
+        "ac": character.ac or 10,
+        "equipment": character.equipment or [],
+        "relationships": character.relationships or [],
+        "faction": character.faction or "",
+        "goals": character.goals or [],
+        "ideals": character.ideals or [],
+        "flaws": character.flaws or [],
+        "personal_traits": character.personal_traits or [],
+    }
+    session.set_selected_character(updated_char_data)
+
 
 async def handle_roll_command(websocket: WebSocket, campaign_id: int, dice_str: str):
     """处理投骰命令"""
@@ -786,7 +1049,7 @@ async def handle_roll_command(websocket: WebSocket, campaign_id: int, dice_str: 
 
 
 async def handle_load_save(websocket: WebSocket, campaign_id: int, user: User, save_id: int):
-    """处理加载存档 —— P0-2: 恢复完整游戏状态"""
+    """处理加载存档 —— 恢复完整世界状态（场景/NPC/任务/战斗/分支）"""
     from database import SessionLocal
     from models.save import Save
 
@@ -800,14 +1063,21 @@ async def handle_load_save(websocket: WebSocket, campaign_id: int, user: User, s
             })
             return
 
-        # 加载状态
+        snapshot = save.snapshot
+
+        # 加载完整状态
         session = ChatSessionManager.get_or_create_session(campaign_id)
-        session.load_from_snapshot(save.snapshot)
+        session.load_from_snapshot(snapshot)
+
+        # 恢复分支上下文
+        branch_id = snapshot.get("branch_id")
+        if branch_id is not None:
+            session.current_branch_id = branch_id
 
         # 从数据库加载消息历史
         session.load_messages_from_db(campaign_id, db)
 
-        # 标记为已生成开场（从存档加载了消息）
+        # 标记为已生成开场
         session.story_generated = True
 
         # 发送清空消息
@@ -824,16 +1094,24 @@ async def handle_load_save(websocket: WebSocket, campaign_id: int, user: User, s
                 "content": msg.content
             })
 
-        # 广播完整的加载信息，包含角色数据和场景
+        # 广播完整的世界状态（包含所有新字段）
         await websocket.send_json({
             "type": "save_loaded",
             "content": f"已加载存档: {save.name}",
-            "snapshot": save.snapshot,
+            "snapshot": snapshot,
             "scene": session.game_state.current_scene,
             "npcs": session.game_state.npcs,
             "locations": session.game_state.locations,
+            "quests": session.game_state.quests,
+            "world_state": session.game_state.world_state,
+            "combat_state": session.game_state.combat_state,
+            "enemies": session.game_state.enemies,
+            "turn_order": session.game_state.turn_order,
+            "initiative": session.game_state.initiative,
+            "relationship_map": session.game_state.relationship_map,
             "selected_character": session.game_state.selected_character,
-            "character_stats": session.game_state.character_stats
+            "character_stats": session.game_state.character_stats,
+            "branch_id": session.current_branch_id,
         })
 
     finally:

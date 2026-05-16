@@ -72,9 +72,15 @@ export interface Character {
   hp: number;
   ac: number;
   skills: string[];
-  equipment: string[];  // 背包物品列表
+  equipment: string[];
   backstory?: string;
   personality: Record<string, string>;
+  relationships?: Array<{ name: string; type: string; description: string; attitude: string }>;
+  faction?: string;
+  goals?: Array<{ name: string; description: string; status: string }>;
+  ideals?: string[];
+  flaws?: string[];
+  personal_traits?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -96,6 +102,7 @@ export interface Campaign {
   title: string;
   description?: string;
   ai_config_id?: number;
+  character_id?: number;
   system_prompt?: string;
   current_session: number;
   status: 'active' | 'archived';

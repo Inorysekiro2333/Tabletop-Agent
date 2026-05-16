@@ -3,8 +3,13 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    # Database
-    database_url: str = "mysql+pymysql://user:password@localhost:3306/tabletop_agent"
+    # Database — 默认 PostgreSQL，兼容 MySQL
+    # 实际凭据请在 backend/.env 中配置，不要写进代码
+    database_url: str = "postgresql+psycopg://postgres:changeme@localhost:5432/hello_golang"
+
+    # Redis — 会话缓存（优雅降级，不可用时不影响运行）
+    redis_url: str = "redis://localhost:6379/0"
+    redis_ttl_seconds: int = 86400  # 24 hours
 
     # JWT
     jwt_secret_key: str = "change-this-secret-key-in-production"

@@ -18,6 +18,7 @@ class Campaign(Base):
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     ai_config_id = Column(Integer, ForeignKey("ai_configs.id"), nullable=True)
+    character_id = Column(Integer, ForeignKey("characters.id"), nullable=True)
     system_prompt = Column(Text, nullable=True)
     current_session = Column(Integer, default=1)
     status = Column(SQLEnum(CampaignStatus), default=CampaignStatus.ACTIVE)
@@ -27,3 +28,4 @@ class Campaign(Base):
 
     user = relationship("User", backref="campaigns")
     ai_config = relationship("AIConfig", backref="campaigns")
+    character = relationship("Character", backref="campaigns")

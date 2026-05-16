@@ -228,6 +228,72 @@
   padding: 12px;
 }
 
+/* New character fields — goals, relations, backstory */
+.goal-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 0;
+}
+.goal-name {
+  color: var(--color-text-primary);
+  flex: 1;
+}
+.goal-status {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--color-bg-card);
+  color: var(--color-text-muted);
+}
+.goal-status.status-进行中,
+.goal-status.status-active {
+  color: var(--color-accent-primary);
+  border: 1px solid var(--color-accent-primary);
+}
+
+.relation-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 0;
+}
+.relation-name {
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+.relation-type {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--color-bg-card);
+}
+.relation-attitude {
+  font-size: 10px;
+  color: var(--color-accent-primary);
+}
+
+.backstory-text {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.faction-tag {
+  border-color: var(--color-accent-primary);
+  color: var(--color-accent-primary);
+}
+
+.flaw-tag {
+  border-color: oklch(50% 0.15 10);
+  color: oklch(65% 0.15 10);
+}
+
 /* Quick dice in sidebar */
 .quick-dice {
   padding: 16px 20px;
@@ -815,44 +881,9 @@
 /* -------------------------------------------------------------------------
    Formatted Message Segments (color-coded AI response)
    ------------------------------------------------------------------------- */
-.fm-seg {
-  display: block;
-  padding: 6px 10px;
-  margin: 4px 0;
-  border-radius: 4px;
-  border-left: 3px solid transparent;
-}
-
-.fm-seg.fm-desc {
-  background: oklch(55% 0.03 260 / 0.06);
-  border-left-color: oklch(55% 0.06 260);
-  color: oklch(55% 0.03 260);
-}
-
-.fm-seg.fm-action {
-  background: oklch(55% 0.1 65 / 0.08);
-  border-left-color: oklch(55% 0.12 65);
-  color: oklch(50% 0.1 65);
-  font-weight: 500;
-}
-
-.fm-seg.fm-npc {
-  background: oklch(55% 0.08 290 / 0.06);
-  border-left-color: oklch(55% 0.1 290);
-  color: oklch(50% 0.08 290);
-}
-
-.fm-seg.fm-event {
-  background: oklch(55% 0.1 160 / 0.08);
-  border-left-color: oklch(55% 0.12 160);
-  color: oklch(45% 0.1 160);
-  font-weight: 500;
-}
-
-.fm-seg.fm-status {
-  background: oklch(55% 0.12 25 / 0.08);
-  border-left-color: oklch(55% 0.15 25);
-  color: oklch(48% 0.12 25);
+/* Inline emphasis for **bold** in AI responses */
+.message-content strong {
+  color: var(--color-accent-primary);
   font-weight: 600;
 }
 

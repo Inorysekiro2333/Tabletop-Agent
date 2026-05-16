@@ -4,6 +4,7 @@ from typing import List
 from database import get_db
 from models.user import User
 from models.campaign import Campaign, CampaignStatus
+from models.character import Character
 from models.ai_config import AIConfig
 from models.save import Save, SessionLog
 from models.chat_branch import ChatBranch
@@ -30,6 +31,18 @@ async def create_campaign(
     db: Session = Depends(get_db)
 ):
     """Create a new campaign"""
+    # 验证角色存在且属于当前用户
+    if campaign_data.character_id:
+        character = db.query(Character).filter(
+            Character.id == campaign_data.character_id,
+            Character.user_id == current_user.id
+        ).first()
+        if not character:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Character not found"
+            )
+
     # 验证 AI 配置存在且属于当前用户
     if campaign_data.ai_config_id:
         ai_config = db.query(AIConfig).filter(
@@ -47,6 +60,7 @@ async def create_campaign(
         title=campaign_data.title,
         description=campaign_data.description,
         ai_config_id=campaign_data.ai_config_id,
+        character_id=campaign_data.character_id,
         system_prompt=campaign_data.system_prompt
     )
     db.add(campaign)
@@ -95,6 +109,18 @@ async def update_campaign(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Campaign not found"
         )
+
+    # 验证角色
+    if campaign_data.character_id:
+        character = db.query(Character).filter(
+            Character.id == campaign_data.character_id,
+            Character.user_id == current_user.id
+        ).first()
+        if not character:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Character not found"
+            )
 
     # 验证 AI 配置
     if campaign_data.ai_config_id:

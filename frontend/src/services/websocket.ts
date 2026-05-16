@@ -109,8 +109,8 @@ class WebSocketService {
     this.send({ type: 'save_game', content: name });
   }
 
-  createBranch(name: string) {
-    this.send({ type: 'branch_create', content: name });
+  createBranch(name: string, contextMessages?: Array<{ role: string; content: string }>) {
+    this.send({ type: 'branch_create', content: name, messages: contextMessages || [] });
   }
 
   sendBranchMessage(content: string) {
